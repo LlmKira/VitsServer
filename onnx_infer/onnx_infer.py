@@ -95,6 +95,7 @@ class PosteriorEncoder(nn.Module):
 class SynthesizerTrn(models.SynthesizerTrn):
     """
     Synthesizer for Training
+    重写 SynthesizerTrn 的 forward 函数，使其可以输出中间层的输出
     """
 
     def __init__(self,

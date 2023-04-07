@@ -127,7 +127,7 @@ class TtsGenerate(object):
         # 判定是否存在模型
         if not Path(self.model_path).exists() or not Path(self.model_config_path).exists():
             return None
-        model = ONNXVITS_infer.SynthesizerTrn(
+        model = SynthesizerTrn(
             len(self.hps_ms_config.symbols),
             self.hps_ms_config.data.filter_length // 2 + 1,
             self.hps_ms_config.train.segment_size // self.hps_ms_config.data.hop_length,

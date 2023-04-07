@@ -4,10 +4,10 @@ import torch
 from torch import nn
 from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn import functional as F
-from torch.nn.utils import weight_norm
+from torch.nn.utils import weight_norm, remove_weight_norm
 
-from . import attentions
-from . import modules, commons
+from . import commons, attentions
+from . import modules
 from .commons import init_weights
 
 
@@ -295,6 +295,13 @@ class Generator(torch.nn.Module):
         x = torch.tanh(x)
 
         return x
+
+    def remove_weight_norm(self):
+        print('Removing weight norm...')
+        for l in self.ups:
+            remove_weight_norm(l)
+        for l in self.resblocks:
+            l.remove_weight_norm()
 
 
 class SynthesizerTrn(nn.Module):
