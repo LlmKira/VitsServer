@@ -28,3 +28,4 @@ rtoml
 graiax-silkcoder[libsndfile]
 psutil
 fasttext-wheel
+chardet
