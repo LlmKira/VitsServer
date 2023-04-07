@@ -100,10 +100,10 @@ class VitsExtractor(object):
             if not enc_p_path.exists() or not dp_path.exists() or not flow_path.exists() or not dec_path.exists():
                 raise ValueError("The model files do not exist")
             return VitsBase(
-                enc_p_path,
-                dp_path,
-                flow_path,
-                dec_path
+                enc_p=enc_p_path,
+                dp=dp_path,
+                flow=flow_path,
+                dec=dec_path
             )
         if model_path.exists():
             enc_p_io, dp_io, flow_io, dec_io = self.convert_model(
@@ -111,7 +111,7 @@ class VitsExtractor(object):
                 model_path="model/1374_epochs.pth",
                 write_to_folder=True
             )
-            return VitsBase(enc_p_io, dp_io, flow_io, dec_io)
+            return VitsBase(enc_p=enc_p_io, dp=dp_io, flow=flow_io, dec=dec_io)
         if True:
             raise ValueError("The model files do not exist")
 

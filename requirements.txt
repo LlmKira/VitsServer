@@ -29,3 +29,5 @@ graiax-silkcoder[libsndfile]
 psutil
 fasttext-wheel
 chardet
+onnx
+onnxruntime
