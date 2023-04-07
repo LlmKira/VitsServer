@@ -107,8 +107,8 @@ class VitsExtractor(object):
             )
         if model_path.exists():
             enc_p_io, dp_io, flow_io, dec_io = self.convert_model(
-                json_path="model/1374_epochs.pth.json",
-                model_path="model/1374_epochs.pth",
+                json_path=model_config_path,
+                model_path=model_path,
                 write_to_folder=True
             )
             return VitsBase(enc_p=enc_p_io, dp=dp_io, flow=flow_io, dec=dec_io)
