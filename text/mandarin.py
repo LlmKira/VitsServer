@@ -8,7 +8,13 @@ import jieba
 from pypinyin import lazy_pinyin, BOPOMOFO
 
 logging.getLogger('jieba').setLevel(logging.WARNING)
-jieba.set_dictionary(os.path.dirname(sys.argv[0]) + '/jieba/dict.txt')
+# 判定本目录/上层目录词库是否存在
+if os.path.exists(os.path.dirname(sys.argv[0]) + '/jieba/dict.txt'):
+    jieba.set_dictionary(os.path.dirname(sys.argv[0]) + '/jieba/dict.txt')
+elif os.path.exists(os.path.dirname(sys.argv[0]) + '/../jieba/dict.txt'):
+    jieba.set_dictionary(os.path.dirname(sys.argv[0]) + '/../jieba/dict.txt')
+else:
+    raise FileNotFoundError('jieba/dict.txt not found')
 jieba.initialize()
 
 # List of (Latin alphabet, bopomofo) pairs:

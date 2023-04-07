@@ -6,9 +6,9 @@ from torch.nn import Conv1d
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm
 
-import commons
-from ONNXVITS_transforms import piecewise_rational_quadratic_transform
-from commons import init_weights, get_padding
+from infer import commons
+from infer.commons import init_weights, get_padding
+from infer.transforms import piecewise_rational_quadratic_transform
 
 LRELU_SLOPE = 0.1
 
@@ -65,7 +65,7 @@ class ConvReluNorm(nn.Module):
 
 class DDSConv(nn.Module):
     """
-    Dialted and Depth-Separable Convolution
+    Dilated and Depth-Separable Convolution
     """
 
     def __init__(self, channels, kernel_size, n_layers, p_dropout=0.):

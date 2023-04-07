@@ -6,7 +6,7 @@ from numpy import float32
 from torch import load, FloatTensor
 
 
-class HParams():
+class HParams(object):
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             if type(v) == dict:

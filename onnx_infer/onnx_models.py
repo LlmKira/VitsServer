@@ -6,13 +6,9 @@ from torch.nn import Conv1d, ConvTranspose1d, Conv2d
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
-import ONNXVITS_modules as modules
-import attentions
-import commons
-from commons import init_weights, get_padding
-
-
-# import monotonic_align
+import onnx_modules as modules
+from infer import commons, attentions
+from infer.commons import init_weights, get_padding
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -52,7 +48,7 @@ class StochasticDurationPredictor(nn.Module):
         self.reverse = None
         self.noise_scale = None
 
-    def forward(self, x, x_mask, zin, g=None):
+    def forward(self, x, x_mask, g=None):
         w = self.w
         reverse = self.reverse
         noise_scale = self.noise_scale
@@ -65,14 +61,43 @@ class StochasticDurationPredictor(nn.Module):
         x = self.convs(x, x_mask)
         x = self.proj(x) * x_mask
 
-        flows = list(reversed(self.flows))
-        flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
-        z = zin
-        for flow in flows:
-            z = flow(z, x_mask, g=x, reverse=reverse)
-        z0, z1 = torch.split(z, [1, 1], 1)
-        logw = z0
-        return logw
+        if not reverse:
+            flows = self.flows
+            assert w is not None
+
+            logdet_tot_q = 0
+            h_w = self.post_pre(w)
+            h_w = self.post_convs(h_w, x_mask)
+            h_w = self.post_proj(h_w) * x_mask
+            e_q = torch.randn(w.size(0), 2, w.size(2)).to(device=x.device, dtype=x.dtype) * x_mask
+            z_q = e_q
+            for flow in self.post_flows:
+                z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
+                logdet_tot_q += logdet_q
+            z_u, z1 = torch.split(z_q, [1, 1], 1)
+            u = torch.sigmoid(z_u) * x_mask
+            z0 = (w - u) * x_mask
+            logdet_tot_q += torch.sum((F.logsigmoid(z_u) + F.logsigmoid(-z_u)) * x_mask, [1, 2])
+            logq = torch.sum(-0.5 * (math.log(2 * math.pi) + (e_q ** 2)) * x_mask, [1, 2]) - logdet_tot_q
+
+            logdet_tot = 0
+            z0, logdet = self.log_flow(z0, x_mask)
+            logdet_tot += logdet
+            z = torch.cat([z0, z1], 1)
+            for flow in flows:
+                z, logdet = flow(z, x_mask, g=x, reverse=reverse)
+                logdet_tot = logdet_tot + logdet
+            nll = torch.sum(0.5 * (math.log(2 * math.pi) + (z ** 2)) * x_mask, [1, 2]) - logdet_tot
+            return nll + logq  # [b]
+        else:
+            flows = list(reversed(self.flows))
+            flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
+            z = torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype) * noise_scale
+            for flow in flows:
+                z = flow(z, x_mask, g=x, reverse=reverse)
+            z0, z1 = torch.split(z, [1, 1], 1)
+            logw = z0
+            return logw
 
 
 class TextEncoder(nn.Module):
@@ -316,7 +341,7 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         periods = [2, 3, 5, 7, 11]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
-        discs = discs + [DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods]
+        discs = discs.extend([DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods])
         self.discriminators = nn.ModuleList(discs)
 
     def forward(self, y, y_hat):
@@ -403,11 +428,7 @@ class SynthesizerTrn(nn.Module):
         if n_speakers > 0:
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
-    def forward(self, x, x_lengths, sid=None):
-        noise_scale = .667
-        length_scale = 1
-        noise_scale_w = 0.8
-        max_len = None
+    def forward(self, x, x_lengths, sid=None, noise_scale=.667, length_scale=1, noise_scale_w=.8, max_len=None):
         torch.onnx.export(
             self.enc_p,
             (x, x_lengths),
@@ -429,24 +450,23 @@ class SynthesizerTrn(nn.Module):
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
-        zinput = torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype) * noise_scale_w
+
         self.dp.reverse = True
         self.dp.noise_scale = noise_scale_w
         torch.onnx.export(
             self.dp,
-            (x, x_mask, zinput),
+            (x, x_mask, g),
             "ONNX_net/dp.onnx",
-            input_names=["x", "x_mask", "zin"],
+            input_names=["x", "x_mask", "g"],
             output_names=["logw"],
             dynamic_axes={
                 "x": [2],
                 "x_mask": [2],
-                "zin": [0, 2],
                 "logw": [2]
             },
             verbose=True,
         )
-        logw = self.dp(x, x_mask, zinput, g=g)
+        logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
         w_ceil = torch.ceil(w)
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
@@ -454,18 +474,19 @@ class SynthesizerTrn(nn.Module):
         attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
         attn = commons.generate_path(w_ceil, attn_mask)
 
-        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)  # [b, t', t], [b, t, d] -> [b, d, t']
-        logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1,
-                                                                                 2)  # [b, t', t], [b, t, d] -> [b, d, t']
+        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)
+        # [b, t', t], [b, t, d] -> [b, d, t']
+        logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1, 2)
+        # [b, t', t], [b, t, d] -> [b, d, t']
 
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
 
         self.flow.reverse = True
         torch.onnx.export(
             self.flow,
-            (z_p, y_mask),
+            (z_p, y_mask, g),
             "ONNX_net/flow.onnx",
-            input_names=["z_p", "y_mask"],
+            input_names=["z_p", "y_mask", "g"],
             output_names=["z"],
             dynamic_axes={
                 "z_p": [2],
@@ -479,9 +500,9 @@ class SynthesizerTrn(nn.Module):
 
         torch.onnx.export(
             self.dec,
-            (z_in),
+            (z_in, g),
             "ONNX_net/dec.onnx",
-            input_names=["z_in"],
+            input_names=["z_in", "g"],
             output_names=["o"],
             dynamic_axes={
                 "z_in": [2],

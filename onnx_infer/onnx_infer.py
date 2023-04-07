@@ -3,10 +3,8 @@ import math
 import torch
 from torch import nn
 
-import attentions
-import commons
-import models
-import modules
+from infer import commons, attentions, models, modules
+from onnx_utils import runonnx
 
 
 class TextEncoder(nn.Module):
@@ -160,7 +158,7 @@ class SynthesizerTrn(models.SynthesizerTrn):
 
     def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None,
               emotion_embedding=None):
-        from ONNXVITS_utils import runonnx
+
         with torch.no_grad():
             x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)
 

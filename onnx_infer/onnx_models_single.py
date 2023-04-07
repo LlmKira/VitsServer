@@ -2,14 +2,15 @@ import math
 
 import torch
 from torch import nn
-from torch.nn import Conv1d, ConvTranspose1d
+from torch.nn import Conv1d, ConvTranspose1d, Conv2d
 from torch.nn import functional as F
-from torch.nn.utils import weight_norm
+from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
-import attentions
-import commons
-import modules
-from commons import init_weights
+import onnx_modules as modules
+from infer import commons, attentions
+from infer.commons import init_weights, get_padding
+
+# import monotonic_align
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -45,7 +46,15 @@ class StochasticDurationPredictor(nn.Module):
         if gin_channels != 0:
             self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
 
-    def forward(self, x, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
+        self.w = None
+        self.reverse = None
+        self.noise_scale = None
+
+    def forward(self, x, x_mask, zin, g=None):
+        w = self.w
+        reverse = self.reverse
+        noise_scale = self.noise_scale
+
         x = torch.detach(x)
         x = self.pre(x)
         if g is not None:
@@ -54,80 +63,14 @@ class StochasticDurationPredictor(nn.Module):
         x = self.convs(x, x_mask)
         x = self.proj(x) * x_mask
 
-        if not reverse:
-            flows = self.flows
-            assert w is not None
-
-            logdet_tot_q = 0
-            h_w = self.post_pre(w)
-            h_w = self.post_convs(h_w, x_mask)
-            h_w = self.post_proj(h_w) * x_mask
-            e_q = torch.randn(w.size(0), 2, w.size(2)).to(device=x.device, dtype=x.dtype) * x_mask
-            z_q = e_q
-            for flow in self.post_flows:
-                z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
-                logdet_tot_q += logdet_q
-            z_u, z1 = torch.split(z_q, [1, 1], 1)
-            u = torch.sigmoid(z_u) * x_mask
-            z0 = (w - u) * x_mask
-            logdet_tot_q += torch.sum((F.logsigmoid(z_u) + F.logsigmoid(-z_u)) * x_mask, [1, 2])
-            logq = torch.sum(-0.5 * (math.log(2 * math.pi) + (e_q ** 2)) * x_mask, [1, 2]) - logdet_tot_q
-
-            logdet_tot = 0
-            z0, logdet = self.log_flow(z0, x_mask)
-            logdet_tot += logdet
-            z = torch.cat([z0, z1], 1)
-            for flow in flows:
-                z, logdet = flow(z, x_mask, g=x, reverse=reverse)
-                logdet_tot = logdet_tot + logdet
-            nll = torch.sum(0.5 * (math.log(2 * math.pi) + (z ** 2)) * x_mask, [1, 2]) - logdet_tot
-            return nll + logq  # [b]
-        else:
-            flows = list(reversed(self.flows))
-            flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
-            z = torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype) * noise_scale
-            for flow in flows:
-                z = flow(z, x_mask, g=x, reverse=reverse)
-            z0, z1 = torch.split(z, [1, 1], 1)
-            logw = z0
-            return logw
-
-
-class DurationPredictor(nn.Module):
-    def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0):
-        super().__init__()
-
-        self.in_channels = in_channels
-        self.filter_channels = filter_channels
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
-
-        self.drop = nn.Dropout(p_dropout)
-        self.conv_1 = nn.Conv1d(in_channels, filter_channels, kernel_size, padding=kernel_size // 2)
-        self.norm_1 = modules.LayerNorm(filter_channels)
-        self.conv_2 = nn.Conv1d(filter_channels, filter_channels, kernel_size, padding=kernel_size // 2)
-        self.norm_2 = modules.LayerNorm(filter_channels)
-        self.proj = nn.Conv1d(filter_channels, 1, 1)
-
-        if gin_channels != 0:
-            self.cond = nn.Conv1d(gin_channels, in_channels, 1)
-
-    def forward(self, x, x_mask, g=None):
-        x = torch.detach(x)
-        if g is not None:
-            g = torch.detach(g)
-            x = x + self.cond(g)
-        x = self.conv_1(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_1(x)
-        x = self.drop(x)
-        x = self.conv_2(x * x_mask)
-        x = torch.relu(x)
-        x = self.norm_2(x)
-        x = self.drop(x)
-        x = self.proj(x * x_mask)
-        return x * x_mask
+        flows = list(reversed(self.flows))
+        flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
+        z = zin
+        for flow in flows:
+            z = flow(z, x_mask, g=x, reverse=reverse)
+        z0, z1 = torch.split(z, [1, 1], 1)
+        logw = z0
+        return logw
 
 
 class TextEncoder(nn.Module):
@@ -139,8 +82,7 @@ class TextEncoder(nn.Module):
                  n_heads,
                  n_layers,
                  kernel_size,
-                 p_dropout,
-                 emotion_embedding):
+                 p_dropout):
         super().__init__()
         self.n_vocab = n_vocab
         self.out_channels = out_channels
@@ -150,13 +92,9 @@ class TextEncoder(nn.Module):
         self.n_layers = n_layers
         self.kernel_size = kernel_size
         self.p_dropout = p_dropout
-        self.emotion_embedding = emotion_embedding
 
-        if self.n_vocab != 0:
-            self.emb = nn.Embedding(n_vocab, hidden_channels)
-            if emotion_embedding:
-                self.emo_proj = nn.Linear(1024, hidden_channels)
-            nn.init.normal_(self.emb.weight, 0.0, hidden_channels ** -0.5)
+        self.emb = nn.Embedding(n_vocab, hidden_channels)
+        nn.init.normal_(self.emb.weight, 0.0, hidden_channels ** -0.5)
 
         self.encoder = attentions.Encoder(
             hidden_channels,
@@ -167,11 +105,8 @@ class TextEncoder(nn.Module):
             p_dropout)
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, x, x_lengths, emotion_embedding=None):
-        if self.n_vocab != 0:
-            x = self.emb(x) * math.sqrt(self.hidden_channels)  # [b, t, h]
-        if emotion_embedding is not None:
-            x = x + self.emo_proj(emotion_embedding.unsqueeze(1))
+    def forward(self, x, x_lengths):
+        x = self.emb(x) * math.sqrt(self.hidden_channels)  # [b, t, h]
         x = torch.transpose(x, 1, -1)  # [b, h, t]
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
 
@@ -207,7 +142,10 @@ class ResidualCouplingBlock(nn.Module):
                                               gin_channels=gin_channels, mean_only=True))
             self.flows.append(modules.Flip())
 
-    def forward(self, x, x_mask, g=None, reverse=False):
+        self.reverse = None
+
+    def forward(self, x, x_mask, g=None):
+        reverse = self.reverse
         if not reverse:
             for flow in self.flows:
                 x, _ = flow(x, x_mask, g=g, reverse=reverse)
@@ -241,12 +179,12 @@ class PosteriorEncoder(nn.Module):
 
     def forward(self, x, x_lengths, g=None):
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
-        x = self.pre(x) * x_mask
-        x = self.enc(x, x_mask, g=g)
+        x = self.pre(x) * x_mask  # x_in : [b, c, t] -> [b, h, t]
+        x = self.enc(x, x_mask, g=g)  # x_in : [b, h, t], g : [b, h, 1],  x = x_in + g
         stats = self.proj(x) * x_mask
         m, logs = torch.split(stats, self.out_channels, dim=1)
         z = (m + torch.randn_like(m) * torch.exp(logs)) * x_mask
-        return z, m, logs, x_mask
+        return z, m, logs, x_mask  # z, m, logs : [b, h, t]
 
 
 class Generator(torch.nn.Module):
@@ -297,6 +235,103 @@ class Generator(torch.nn.Module):
 
         return x
 
+    def remove_weight_norm(self):
+        print('Removing weight norm...')
+        for l in self.ups:
+            remove_weight_norm(l)
+        for l in self.resblocks:
+            l.remove_weight_norm()
+
+
+class DiscriminatorP(torch.nn.Module):
+    def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
+        super(DiscriminatorP, self).__init__()
+        self.period = period
+        self.use_spectral_norm = use_spectral_norm
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+        self.convs = nn.ModuleList([
+            norm_f(Conv2d(1, 32, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+            norm_f(Conv2d(32, 128, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+            norm_f(Conv2d(128, 512, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+            norm_f(Conv2d(512, 1024, (kernel_size, 1), (stride, 1), padding=(get_padding(kernel_size, 1), 0))),
+            norm_f(Conv2d(1024, 1024, (kernel_size, 1), 1, padding=(get_padding(kernel_size, 1), 0))),
+        ])
+        self.conv_post = norm_f(Conv2d(1024, 1, (3, 1), 1, padding=(1, 0)))
+
+    def forward(self, x):
+        fmap = []
+
+        # 1d to 2d
+        b, c, t = x.shape
+        if t % self.period != 0:  # pad first
+            n_pad = self.period - (t % self.period)
+            x = F.pad(x, (0, n_pad), "reflect")
+            t = t + n_pad
+        x = x.view(b, c, t // self.period, self.period)
+
+        for l in self.convs:
+            x = l(x)
+            x = F.leaky_relu(x, modules.LRELU_SLOPE)
+            fmap.append(x)
+        x = self.conv_post(x)
+        fmap.append(x)
+        x = torch.flatten(x, 1, -1)
+
+        return x, fmap
+
+
+class DiscriminatorS(torch.nn.Module):
+    def __init__(self, use_spectral_norm=False):
+        super(DiscriminatorS, self).__init__()
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+        self.convs = nn.ModuleList([
+            norm_f(Conv1d(1, 16, 15, 1, padding=7)),
+            norm_f(Conv1d(16, 64, 41, 4, groups=4, padding=20)),
+            norm_f(Conv1d(64, 256, 41, 4, groups=16, padding=20)),
+            norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
+            norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
+            norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
+        ])
+        self.conv_post = norm_f(Conv1d(1024, 1, 3, 1, padding=1))
+
+    def forward(self, x):
+        fmap = []
+
+        for l in self.convs:
+            x = l(x)
+            x = F.leaky_relu(x, modules.LRELU_SLOPE)
+            fmap.append(x)
+        x = self.conv_post(x)
+        fmap.append(x)
+        x = torch.flatten(x, 1, -1)
+
+        return x, fmap
+
+
+class MultiPeriodDiscriminator(torch.nn.Module):
+    def __init__(self, use_spectral_norm=False):
+        super(MultiPeriodDiscriminator, self).__init__()
+        periods = [2, 3, 5, 7, 11]
+
+        discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
+        discs = discs + [DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods]
+        self.discriminators = nn.ModuleList(discs)
+
+    def forward(self, y, y_hat):
+        y_d_rs = []
+        y_d_gs = []
+        fmap_rs = []
+        fmap_gs = []
+        for i, d in enumerate(self.discriminators):
+            y_d_r, fmap_r = d(y)
+            y_d_g, fmap_g = d(y_hat)
+            y_d_rs.append(y_d_r)
+            y_d_gs.append(y_d_g)
+            fmap_rs.append(fmap_r)
+            fmap_gs.append(fmap_g)
+
+        return y_d_rs, y_d_gs, fmap_rs, fmap_gs
+
 
 class SynthesizerTrn(nn.Module):
     """
@@ -323,7 +358,6 @@ class SynthesizerTrn(nn.Module):
                  n_speakers=0,
                  gin_channels=0,
                  use_sdp=True,
-                 emotion_embedding=False,
                  **kwargs):
 
         super().__init__()
@@ -355,34 +389,62 @@ class SynthesizerTrn(nn.Module):
                                  n_heads,
                                  n_layers,
                                  kernel_size,
-                                 p_dropout,
-                                 emotion_embedding)
+                                 p_dropout)
         self.dec = Generator(inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates,
                              upsample_initial_channel, upsample_kernel_sizes, gin_channels=gin_channels)
         self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16,
                                       gin_channels=gin_channels)
         self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
 
-        if use_sdp:
-            self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels)
-        else:
-            self.dp = DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
+        self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels)
 
-        if n_speakers > 1:
+        if n_speakers > 0:
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
-    def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None,
-              emotion_embedding=None):
-        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)
+    def forward(self, x, x_lengths, sid=None):
+        noise_scale = .667
+        length_scale = 1
+        noise_scale_w = 0.8
+        max_len = None
+        torch.onnx.export(
+            self.enc_p,
+            (x, x_lengths),
+            "ONNX_net/enc_p.onnx",
+            input_names=["x", "x_lengths"],
+            output_names=["xout", "m_p", "logs_p", "x_mask"],
+            dynamic_axes={
+                "x": [1],
+                "xout": [2],
+                "m_p": [2],
+                "logs_p": [2],
+                "x_mask": [2]
+            },
+            verbose=True,
+        )
+        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
+
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
-
-        if self.use_sdp:
-            logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
-        else:
-            logw = self.dp(x, x_mask, g=g)
+        zinput = torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype) * noise_scale_w
+        self.dp.reverse = True
+        self.dp.noise_scale = noise_scale_w
+        torch.onnx.export(
+            self.dp,
+            (x, x_mask, zinput),
+            "ONNX_net/dp.onnx",
+            input_names=["x", "x_mask", "zin"],
+            output_names=["logw"],
+            dynamic_axes={
+                "x": [2],
+                "x_mask": [2],
+                "zin": [0, 2],
+                "logw": [2]
+            },
+            verbose=True,
+        )
+        logw = self.dp(x, x_mask, zinput, g=g)
         w = torch.exp(logw) * x_mask * length_scale
         w_ceil = torch.ceil(w)
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
@@ -395,16 +457,35 @@ class SynthesizerTrn(nn.Module):
                                                                                  2)  # [b, t', t], [b, t, d] -> [b, d, t']
 
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
-        z = self.flow(z_p, y_mask, g=g, reverse=True)
-        o = self.dec((z * y_mask)[:, :, :max_len], g=g)
-        return o, attn, y_mask, (z, z_p, m_p, logs_p)
 
-    def voice_conversion(self, y, y_lengths, sid_src, sid_tgt):
-        assert self.n_speakers > 0, "n_speakers have to be larger than 0."
-        g_src = self.emb_g(sid_src).unsqueeze(-1)
-        g_tgt = self.emb_g(sid_tgt).unsqueeze(-1)
-        z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g_src)
-        z_p = self.flow(z, y_mask, g=g_src)
-        z_hat = self.flow(z_p, y_mask, g=g_tgt, reverse=True)
-        o_hat = self.dec(z_hat * y_mask, g=g_tgt)
-        return o_hat, y_mask, (z, z_p, z_hat)
+        self.flow.reverse = True
+        torch.onnx.export(
+            self.flow,
+            (z_p, y_mask),
+            "ONNX_net/flow.onnx",
+            input_names=["z_p", "y_mask"],
+            output_names=["z"],
+            dynamic_axes={
+                "z_p": [2],
+                "y_mask": [2],
+                "z": [2]
+            },
+            verbose=True,
+        )
+        z = self.flow(z_p, y_mask, g=g)
+        z_in = (z * y_mask)[:, :, :max_len]
+
+        torch.onnx.export(
+            self.dec,
+            (z_in),
+            "ONNX_net/dec.onnx",
+            input_names=["z_in"],
+            output_names=["o"],
+            dynamic_axes={
+                "z_in": [2],
+                "o": [2]
+            },
+            verbose=True,
+        )
+        o = self.dec(z_in, g=g)
+        return o
