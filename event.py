@@ -138,6 +138,8 @@ class TtsGenerate(object):
             n_speakers=self.hps_ms_config.data.n_speakers,
             **self.hps_ms_config.model
         )
+        utils.load_checkpoint(self.model_path, model,None)
+        model.eval()
         # utils.load_checkpoint(self.model_path, model)
         # model.eval().to(torch.device(self.device))
         return model

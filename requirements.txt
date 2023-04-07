@@ -31,3 +31,4 @@ fasttext-wheel
 chardet
 onnx
 onnxruntime
+loguru
