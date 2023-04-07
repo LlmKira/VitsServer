@@ -158,18 +158,20 @@ class SynthesizerTrn(models.SynthesizerTrn):
         self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16,
                                       gin_channels=gin_channels)
 
-    def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None,
+    def infer(self, x, x_lengths, sid=None,
+              noise_scale=1, length_scale=1,
+              noise_scale_w=1, max_len=None,
               emotion_embedding=None):
 
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        x, m_p, logs_p, x_mask = runonnx(self.onnx_model.enc_p, x=x.numpy(), x_lengths=x_lengths.numpy())
-        x = torch.from_numpy(x)
-        m_p = torch.from_numpy(m_p)
-        logs_p = torch.from_numpy(logs_p)
-        x_mask = torch.from_numpy(x_mask)
-        # 禁用什么
-        # with torch.no_grad():
-        #    x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)
+        # x, m_p, logs_p, x_mask = runonnx(self.onnx_model.enc_p, x=x.numpy(), x_lengths=x_lengths.numpy())
+        # x = torch.from_numpy(x)
+        # m_p = torch.from_numpy(m_p)
+        # logs_p = torch.from_numpy(logs_p)
+        # x_mask = torch.from_numpy(x_mask)
+
+        with torch.no_grad():
+            x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)
 
         # 检查sid
         if self.n_speakers > 0:
