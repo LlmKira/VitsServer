@@ -249,6 +249,8 @@ class TtsGenerate(object):
                                          noise_scale=noise_scale,
                                          noise_scale_w=noise_scale_w,
                                          length_scale=1.0 / length_scale)[0][0, 0].data.cpu().float().numpy()
+        # 释放内存
+        del _stn_tst, _x_tst, _x_tst_lengths, _sid
         # 写出返回
         _file = BytesIO()
         sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
