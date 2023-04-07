@@ -3,8 +3,8 @@ import math
 import torch
 from torch import nn
 
-from infer import commons, attentions, models, modules
-from onnx_utils import runonnx
+from .infer import commons, attentions, models, modules
+from .utils.onnx_utils import runonnx
 
 
 class TextEncoder(nn.Module):

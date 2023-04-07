@@ -6,9 +6,9 @@ from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm
 
-from infer import commons, attentions
-from . import modules
-from infer.commons import init_weights
+from . import attentions
+from . import modules, commons
+from .commons import init_weights
 
 
 class StochasticDurationPredictor(nn.Module):

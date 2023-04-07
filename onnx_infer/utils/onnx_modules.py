@@ -6,9 +6,9 @@ from torch.nn import Conv1d
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm
 
-from infer import commons
-from onnx_transforms import piecewise_rational_quadratic_transform
-from infer.commons import init_weights, get_padding
+from .onnx_transforms import piecewise_rational_quadratic_transform
+from ..infer import commons
+from ..infer.commons import init_weights, get_padding
 
 LRELU_SLOPE = 0.1
 

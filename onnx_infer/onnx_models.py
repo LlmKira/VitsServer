@@ -6,9 +6,9 @@ from torch.nn import Conv1d, ConvTranspose1d, Conv2d
 from torch.nn import functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
-import onnx_modules as modules
-from infer import commons, attentions
-from infer.commons import init_weights, get_padding
+from .infer import commons, attentions
+from .infer.commons import init_weights, get_padding
+from .utils import onnx_modules as modules
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -464,7 +464,7 @@ class SynthesizerTrn(nn.Module):
                 "x_mask": [2],
                 "logw": [2]
             },
-            verbose=True,
+            verbose=False,
         )
         logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
@@ -493,7 +493,7 @@ class SynthesizerTrn(nn.Module):
                 "y_mask": [2],
                 "z": [2]
             },
-            verbose=True,
+            verbose=False,
         )
         z = self.flow(z_p, y_mask, g=g)
         z_in = (z * y_mask)[:, :, :max_len]
@@ -508,7 +508,7 @@ class SynthesizerTrn(nn.Module):
                 "z_in": [2],
                 "o": [2]
             },
-            verbose=True,
+            verbose=False,
         )
         o = self.dec(z_in, g=g)
         return o

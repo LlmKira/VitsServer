@@ -1,18 +1,15 @@
 import logging
 import os
 import re
-import sys
 
 import cn2an
 import jieba
 from pypinyin import lazy_pinyin, BOPOMOFO
 
 logging.getLogger('jieba').setLevel(logging.WARNING)
-# 判定本目录/上层目录词库是否存在
-if os.path.exists(os.path.dirname(sys.argv[0]) + '/jieba/dict.txt'):
-    jieba.set_dictionary(os.path.dirname(sys.argv[0]) + '/jieba/dict.txt')
-elif os.path.exists(os.path.dirname(sys.argv[0]) + '/../jieba/dict.txt'):
-    jieba.set_dictionary(os.path.dirname(sys.argv[0]) + '/../jieba/dict.txt')
+# 判定当前模块文件目录词库是否存在
+if os.path.exists(os.path.join(os.path.dirname(__file__), 'jieba/dict.txt')):
+    jieba.set_dictionary(os.path.join(os.path.dirname(__file__), 'jieba/dict.txt'))
 else:
     raise FileNotFoundError('jieba/dict.txt not found')
 jieba.initialize()

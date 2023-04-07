@@ -17,8 +17,7 @@ import torch
 from graiax import silkcoder
 from pydantic import BaseModel
 
-from onnx_infer import onnx_infer
-from infer import commons
+from onnx_infer.infer import commons
 import utils
 from text import text_to_sequence
 

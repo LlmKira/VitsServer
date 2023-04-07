@@ -1,9 +1,9 @@
 import torch
 
 import utils
-from infer import commons
-from onnx_models import SynthesizerTrn
+from onnx_infer.onnx_models import SynthesizerTrn
 from text import text_to_sequence
+from onnx_infer.infer import commons
 
 
 def get_text(text, hps):
