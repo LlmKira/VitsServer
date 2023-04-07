@@ -50,7 +50,7 @@ class StochasticDurationPredictor(nn.Module):
         self.reverse = None
         self.noise_scale = None
 
-    def forward(self, x, x_mask, zin, g=None):
+    def forward(self, x, x_mask, g=None):
         w = self.w
         reverse = self.reverse
         noise_scale = self.noise_scale
@@ -63,14 +63,43 @@ class StochasticDurationPredictor(nn.Module):
         x = self.convs(x, x_mask)
         x = self.proj(x) * x_mask
 
-        flows = list(reversed(self.flows))
-        flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
-        z = zin
-        for flow in flows:
-            z = flow(z, x_mask, g=x, reverse=reverse)
-        z0, z1 = torch.split(z, [1, 1], 1)
-        logw = z0
-        return logw
+        if not reverse:
+            flows = self.flows
+            assert w is not None
+
+            logdet_tot_q = 0
+            h_w = self.post_pre(w)
+            h_w = self.post_convs(h_w, x_mask)
+            h_w = self.post_proj(h_w) * x_mask
+            e_q = torch.randn(w.size(0), 2, w.size(2)).to(device=x.device, dtype=x.dtype) * x_mask
+            z_q = e_q
+            for flow in self.post_flows:
+                z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
+                logdet_tot_q += logdet_q
+            z_u, z1 = torch.split(z_q, [1, 1], 1)
+            u = torch.sigmoid(z_u) * x_mask
+            z0 = (w - u) * x_mask
+            logdet_tot_q += torch.sum((F.logsigmoid(z_u) + F.logsigmoid(-z_u)) * x_mask, [1, 2])
+            logq = torch.sum(-0.5 * (math.log(2 * math.pi) + (e_q ** 2)) * x_mask, [1, 2]) - logdet_tot_q
+
+            logdet_tot = 0
+            z0, logdet = self.log_flow(z0, x_mask)
+            logdet_tot += logdet
+            z = torch.cat([z0, z1], 1)
+            for flow in flows:
+                z, logdet = flow(z, x_mask, g=x, reverse=reverse)
+                logdet_tot = logdet_tot + logdet
+            nll = torch.sum(0.5 * (math.log(2 * math.pi) + (z ** 2)) * x_mask, [1, 2]) - logdet_tot
+            return nll + logq  # [b]
+        else:
+            flows = list(reversed(self.flows))
+            flows = flows[:-2] + [flows[-1]]  # remove a useless vflow
+            z = torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype) * noise_scale
+            for flow in flows:
+                z = flow(z, x_mask, g=x, reverse=reverse)
+            z0, z1 = torch.split(z, [1, 1], 1)
+            logw = z0
+            return logw
 
 
 class TextEncoder(nn.Module):
@@ -401,11 +430,7 @@ class SynthesizerTrn(nn.Module):
         if n_speakers > 0:
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
-    def forward(self, x, x_lengths, sid=None):
-        noise_scale = .667
-        length_scale = 1
-        noise_scale_w = 0.8
-        max_len = None
+    def forward(self, x, x_lengths, sid=None, noise_scale=.667, length_scale=1, noise_scale_w=.8, max_len=None):
         torch.onnx.export(
             self.enc_p,
             (x, x_lengths),
@@ -425,34 +450,25 @@ class SynthesizerTrn(nn.Module):
 
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
-            torch.onnx.export(
-                self.emb_g,
-                (sid),
-                f"ONNX_net/emb.onnx",
-                input_names=["sid"],
-                output_names=["g"],
-                verbose=True,
-            )
         else:
             g = None
-        zinput = torch.randn(x.size(0), 2, x.size(2)).to(device=x.device, dtype=x.dtype) * noise_scale_w
+
         self.dp.reverse = True
         self.dp.noise_scale = noise_scale_w
         torch.onnx.export(
             self.dp,
-            (x, x_mask, zinput, g),
+            (x, x_mask, g),
             "ONNX_net/dp.onnx",
-            input_names=["x", "x_mask", "zin", "g"],
+            input_names=["x", "x_mask", "g"],
             output_names=["logw"],
             dynamic_axes={
                 "x": [2],
                 "x_mask": [2],
-                "zin": [0, 2],
                 "logw": [2]
             },
             verbose=True,
         )
-        logw = self.dp(x, x_mask, zinput, g=g)
+        logw = self.dp(x, x_mask, g=g)
         w = torch.exp(logw) * x_mask * length_scale
         w_ceil = torch.ceil(w)
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
