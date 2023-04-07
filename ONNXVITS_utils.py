@@ -1,7 +1,10 @@
-import torch
-import numpy as np
 import random
+
+import numpy as np
 import onnxruntime as ort
+import torch
+
+
 def set_random_seed(seed=0):
     ort.set_seed(seed)
     torch.manual_seed(seed)
@@ -9,7 +12,6 @@ def set_random_seed(seed=0):
     torch.backends.cudnn.deterministic = True
     random.seed(seed)
     np.random.seed(seed)
-
 
 
 def runonnx(model_path, **kwargs):

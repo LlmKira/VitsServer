@@ -1,8 +1,10 @@
+import torch
+
 import ONNXVITS_models_single
+import commons
 import utils
 from text import text_to_sequence
-import torch
-import commons
+
 
 def get_text(text, hps):
     text_norm = text_to_sequence(text, hps.symbols, hps.data.text_cleaners)
@@ -10,6 +12,7 @@ def get_text(text, hps):
         text_norm = commons.intersperse(text_norm, 0)
     text_norm = torch.LongTensor(text_norm)
     return text_norm
+
 
 hps = utils.get_hparams_from_file("config.json")
 symbols = hps.symbols
