@@ -2,10 +2,13 @@ import random
 
 import numpy as np
 import onnxruntime as ort
-import torch
+
+
+# import torch.backends.cuda
 
 
 def set_random_seed(seed=0):
+    import torch.backends.cudnn
     ort.set_seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
