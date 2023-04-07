@@ -17,8 +17,12 @@ def set_random_seed(seed=0):
     np.random.seed(seed)
 
 
-def runonnx(model_path, **kwargs):
-    ort_session = ort.InferenceSession(model_path)
+def runonnx(model, **kwargs):
+    # 如果是 ByteIO 类，则转换为 bytes
+    if hasattr(model, "getvalue"):
+        model = model.getvalue()
+    # 创造运行时
+    ort_session = ort.InferenceSession(model)
     outputs = ort_session.run(
         None,
         kwargs

@@ -17,8 +17,10 @@ import torch
 from graiax import silkcoder
 from pydantic import BaseModel
 
-from onnx_infer.infer import commons
 import utils
+from onnx_infer import onnx_infer
+from onnx_infer.infer import commons
+from pth2onnx import VitsExtractor
 from text import text_to_sequence
 
 
@@ -127,14 +129,17 @@ class TtsGenerate(object):
         # 判定是否存在模型
         if not Path(self.model_path).exists() or not Path(self.model_config_path).exists():
             return None
-        model = SynthesizerTrn(
+        _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
+        model = onnx_infer.SynthesizerTrn(
             len(self.hps_ms_config.symbols),
             self.hps_ms_config.data.filter_length // 2 + 1,
             self.hps_ms_config.train.segment_size // self.hps_ms_config.data.hop_length,
+            onnx_model=_vits_base,
             n_speakers=self.hps_ms_config.data.n_speakers,
-            **self.hps_ms_config.model)
-        utils.load_checkpoint(self.model_path, model)
-        model.eval().to(torch.device(self.device))
+            **self.hps_ms_config.model
+        )
+        # utils.load_checkpoint(self.model_path, model)
+        # model.eval().to(torch.device(self.device))
         return model
 
     @property

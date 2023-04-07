@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from .infer import commons, attentions, models, modules
+from .onnx_types import VitsBase
 from .utils.onnx_utils import runonnx
 
 
@@ -119,7 +120,7 @@ class SynthesizerTrn(models.SynthesizerTrn):
                  gin_channels=0,
                  use_sdp=True,
                  emotion_embedding=False,
-                 ONNX_dir="./ONNX_net/",
+                 onnx_model: VitsBase = None,
                  **kwargs):
 
         super().__init__(
@@ -144,7 +145,7 @@ class SynthesizerTrn(models.SynthesizerTrn):
             use_sdp=use_sdp,
             **kwargs
         )
-        self.ONNX_dir = ONNX_dir
+        self.onnx_model = onnx_model
         self.enc_p = TextEncoder(n_vocab,
                                  inter_channels,
                                  hidden_channels,
@@ -160,16 +161,24 @@ class SynthesizerTrn(models.SynthesizerTrn):
     def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None,
               emotion_embedding=None):
 
-        with torch.no_grad():
-            x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)
+        # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
+        x, m_p, logs_p, x_mask = runonnx(self.onnx_model.enc_p, x=x.numpy(), x_lengths=x_lengths.numpy())
+        x = torch.from_numpy(x)
+        m_p = torch.from_numpy(m_p)
+        logs_p = torch.from_numpy(logs_p)
+        x_mask = torch.from_numpy(x_mask)
+        # 禁用什么
+        # with torch.no_grad():
+        #    x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)
 
+        # 检查sid
         if self.n_speakers > 0:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
 
         # logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
-        logw = runonnx(f"{self.ONNX_dir}dp.onnx", x=x.numpy(), x_mask=x_mask.numpy(), g=g.numpy())
+        logw = runonnx(self.onnx_model.dp, x=x.numpy(), x_mask=x_mask.numpy(), g=g.numpy())
         logw = torch.from_numpy(logw[0])
 
         w = torch.exp(logw) * x_mask * length_scale
@@ -186,11 +195,11 @@ class SynthesizerTrn(models.SynthesizerTrn):
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
 
         # z = self.flow(z_p, y_mask, g=g, reverse=True)
-        z = runonnx(f"{self.ONNX_dir}flow.onnx", z_p=z_p.numpy(), y_mask=y_mask.numpy(), g=g.numpy())
+        z = runonnx(self.onnx_model.flow, z_p=z_p.numpy(), y_mask=y_mask.numpy(), g=g.numpy())
         z = torch.from_numpy(z[0])
 
         # o = self.dec((z * y_mask)[:,:,:max_len], g=g)
-        o = runonnx(f"{self.ONNX_dir}dec.onnx", z_in=(z * y_mask)[:, :, :max_len].numpy(), g=g.numpy())
+        o = runonnx(self.onnx_model.dec, z_in=(z * y_mask)[:, :, :max_len].numpy(), g=g.numpy())
         o = torch.from_numpy(o[0])
 
         return o, attn, y_mask, (z, z_p, m_p, logs_p)

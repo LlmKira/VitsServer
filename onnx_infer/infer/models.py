@@ -396,9 +396,11 @@ class SynthesizerTrn(nn.Module):
         attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
         attn = commons.generate_path(w_ceil, attn_mask)
 
-        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)  # [b, t', t], [b, t, d] -> [b, d, t']
+        m_p = torch.matmul(attn.squeeze(1), m_p.transpose(1, 2)).transpose(1, 2)
+        # [b, t', t], [b, t, d] -> [b, d, t']
         logs_p = torch.matmul(attn.squeeze(1), logs_p.transpose(1, 2)).transpose(1,
-                                                                                 2)  # [b, t', t], [b, t, d] -> [b, d, t']
+                                                                                 2)
+        # [b, t', t], [b, t, d] -> [b, d, t']
 
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
         z = self.flow(z_p, y_mask, g=g, reverse=True)

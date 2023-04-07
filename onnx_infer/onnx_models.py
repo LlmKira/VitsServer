@@ -1,3 +1,11 @@
+#  -*- coding: utf-8 -*-
+# @Time    : 2021/4/8 上午1:10
+# @Author  : sudoskys
+# @File    : onnx_types.py
+# @Software: PyCharm
+# 此文件只用于导出模型，不用于推理任务
+
+import io
 import math
 
 import torch
@@ -7,8 +15,8 @@ from torch.nn import functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
 from .infer import commons, attentions
+from .infer import modules as modules
 from .infer.commons import init_weights, get_padding
-from .utils import onnx_modules as modules
 
 
 class StochasticDurationPredictor(nn.Module):
@@ -191,6 +199,11 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
 
 class TextEncoder(nn.Module):
+    """
+    此类的实现和 MoeGoe 不同，MoeGoe 额外支持了 emotion 的输入，但是这里没有.
+    不需要管，因为此文件不用于推理，只用于导出
+    """
+
     def __init__(self,
                  n_vocab,
                  out_channels,
@@ -320,11 +333,13 @@ class Generator(torch.nn.Module):
                                 k, u, padding=(k - u) // 2)))
 
         self.resblocks = nn.ModuleList()
+        ch = None
         for i in range(len(self.ups)):
             ch = upsample_initial_channel // (2 ** (i + 1))
             for j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
                 self.resblocks.append(resblock(ch, k, d))
-
+        if ch is None:
+            raise ValueError('Conv1d:ch is None')
         self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
         self.ups.apply(init_weights)
 
@@ -429,11 +444,30 @@ class SynthesizerTrn(nn.Module):
         if n_speakers > 0:
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
-    def forward(self, x, x_lengths, sid=None, noise_scale=.667, length_scale=1, noise_scale_w=.8, max_len=None):
+    def forward(self, x, x_lengths,
+                sid=None, noise_scale=.667, length_scale=1, noise_scale_w=.8,
+                max_len=None
+                ):
+        """
+        前向传播
+        :param x: [b, t]，输入文本
+        :param x_lengths: [b]，输入文本长度
+        :param sid: [b]，说话人 id
+        :param noise_scale: [b]，噪声标准差
+        :param length_scale: [b]，长度缩放
+        :param noise_scale_w: [b]，噪声标准差
+        :param max_len: [b]，最大长度
+        :return: [b, t, c]，输出
+        """
+        # 定义四个 ByteIO 对象
+        enc_p_io = io.BytesIO()
+        dp_io = io.BytesIO()
+        flow_io = io.BytesIO()
+        dec_io = io.BytesIO()
         torch.onnx.export(
             self.enc_p,
             (x, x_lengths),
-            "ONNX_net/enc_p.onnx",
+            enc_p_io,  # "ONNX_net/enc_p.onnx",
             input_names=["x", "x_lengths"],
             output_names=["xout", "m_p", "logs_p", "x_mask"],
             dynamic_axes={
@@ -457,7 +491,7 @@ class SynthesizerTrn(nn.Module):
         torch.onnx.export(
             self.dp,
             (x, x_mask, g),
-            "ONNX_net/dp.onnx",
+            dp_io,  # "ONNX_net/dp.onnx",
             input_names=["x", "x_mask", "g"],
             output_names=["logw"],
             dynamic_axes={
@@ -486,7 +520,7 @@ class SynthesizerTrn(nn.Module):
         torch.onnx.export(
             self.flow,
             (z_p, y_mask, g),
-            "ONNX_net/flow.onnx",
+            flow_io,  # "ONNX_net/flow.onnx",
             input_names=["z_p", "y_mask", "g"],
             output_names=["z"],
             dynamic_axes={
@@ -502,7 +536,7 @@ class SynthesizerTrn(nn.Module):
         torch.onnx.export(
             self.dec,
             (z_in, g),
-            "ONNX_net/dec.onnx",
+            dec_io,  # "ONNX_net/dec.onnx",
             input_names=["z_in", "g"],
             output_names=["o"],
             dynamic_axes={
@@ -511,5 +545,7 @@ class SynthesizerTrn(nn.Module):
             },
             verbose=False,
         )
-        o = self.dec(z_in, g=g)
-        return o
+        # 说明：dec 的作用是 1. 从 z_in 中提取特征
+        # o = self.dec(z_in, g=g)
+        # return o
+        return enc_p_io, dp_io, flow_io, dec_io
