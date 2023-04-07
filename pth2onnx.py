@@ -100,10 +100,10 @@ class VitsExtractor(object):
             if not enc_p_path.exists() or not dp_path.exists() or not flow_path.exists() or not dec_path.exists():
                 raise ValueError("The model files do not exist")
             return VitsBase(
-                enc_p=enc_p_path,
-                dp=dp_path,
-                flow=flow_path,
-                dec=dec_path
+                enc_p=str(enc_p_path.absolute()),
+                dp=str(dp_path.absolute()),
+                flow=str(flow_path.absolute()),
+                dec=str(dec_path.absolute())
             )
         if model_path.exists():
             enc_p_io, dp_io, flow_io, dec_io = self.convert_model(
