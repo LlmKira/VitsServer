@@ -14,6 +14,7 @@ RUN apt-get update && \
 WORKDIR /build
 
 COPY requirements.txt .
+
 RUN python3 -m pip install -r requirements.txt
 
 # Stage 2 - Runtime image
