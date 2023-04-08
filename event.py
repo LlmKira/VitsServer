@@ -8,7 +8,7 @@ import re
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
-from typing import Literal
+from typing import Literal, List, Optional
 
 import numpy as np
 # import librosa
@@ -21,6 +21,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 import utils
+from component.warp import Parse
 from onnx_infer.infer import commons
 from onnx_infer.utils.onnx_utils import RunONNX
 from pth2onnx import VitsExtractor
@@ -44,6 +45,16 @@ class TtsSchema(BaseModel):
     noise_scale_w: float = 0.8
     sample_rate: int = 22050
     load_prefer: bool = True
+
+
+class InferTask(BaseModel):
+    c_text: str
+    speaker_ids: int = 0
+    audio_type: Literal["ogg", "wav", "flac", "silk"] = "wav"
+    length_scale: float = 1.0
+    noise_scale: float = 0.667
+    noise_scale_w: float = 0.8
+    sample_rate: int = None
 
 
 class ParseText(object):
@@ -111,7 +122,8 @@ class TtsGenerate(object):
     批次语音合成技术
     """
 
-    def __init__(self, model_config_path: str, model_path: str = None, device: str = "cpu"):
+    def __init__(self, model_config_path: str, model_path: str = None, device: str = "cpu", load_prefer: bool = True):
+        self.load_prefer = load_prefer
         self.model_config_path = model_config_path
         self.model_path = model_path if model_path else None
         self.device = device
@@ -202,37 +214,23 @@ class TtsGenerate(object):
             id_list.append({"id": ids, "name": name})
         return id_list
 
-    def infer(self,
-              c_text: str,
-              speaker_ids: int = 0,
-              audio_type: str = Literal["ogg", "wav", "flac", "silk"],
-              length_scale: float = 1,
-              noise_scale: float = 0.667,
-              noise_scale_w: float = 0.8,
-              sample_rate: int = None,
-              load_prefer: bool = True,
-              ):
+    def infer_task(self,
+                   task: InferTask = None,
+                   ):
         """
-        :param c_text: 文本
-        :param speaker_ids: 角色ID，0为默认
-        :param audio_type: 音频类型，ogg/wav/flac/silk
-        :param length_scale: 长度缩放，决定了音频时长
-        :param noise_scale: 噪声缩放，决定了音频噪声
-        :param noise_scale_w: 噪声缩放宽度
-        :param sample_rate: 采样率
-        :param load_prefer: 是否加载模型偏好
+        :param task 任务
         :return:
         """
-        c_text = ParseText().clean_text(c_text)
-        _stn_tst = ParseText().get_stn_tst(c_text, self.hps_ms_config)
+        task.c_text = ParseText().clean_text(task.c_text)
+        _stn_tst = ParseText().get_stn_tst(task.c_text, self.hps_ms_config)
 
         # 读模型偏好
-        if load_prefer:
-            noise_scale, noise_scale_w, length_scale = self.load_prefer_noise(self.hps_ms_config,
-                                                                              noise_scale,
-                                                                              noise_scale_w,
-                                                                              length_scale
-                                                                              )
+        if self.load_prefer:
+            task.noise_scale, task.noise_scale_w, task.length_scale = self.load_prefer_noise(self.hps_ms_config,
+                                                                                             task.noise_scale,
+                                                                                             task.noise_scale_w,
+                                                                                             task.length_scale
+                                                                                             )
         # 规则化文本覆盖
         # length_scale, noise_scale, noise_scale_w = ParseText().parse(c_text,
         #                                                             length=length_scale,
@@ -242,8 +240,8 @@ class TtsGenerate(object):
         with torch.no_grad():
             _x_tst = _stn_tst.unsqueeze(0).numpy()
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
-            _sid = np.array([speaker_ids], dtype=np.int64)
-            scales = np.array([noise_scale, noise_scale_w, 1.0 / length_scale], dtype=np.float32)
+            _sid = np.array([task.speaker_ids], dtype=np.int64)
+            scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
             scales.resize(1, 3)
             ort_inputs = {
                 'input': _x_tst,
@@ -259,19 +257,19 @@ class TtsGenerate(object):
         del _stn_tst, _x_tst, _x_tst_lengths, _sid
         # 写出返回
         _file = BytesIO()
-        sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
+        sample_rate = self.hps_ms_config.data.sampling_rate if not task.sample_rate else task.sample_rate
         sample_rate = int(sample_rate)
         sample_rate = 24000 if sample_rate < 0 else sample_rate
         # 使用 scipy 将 Numpy 数据写入字节流
-        if audio_type == "ogg":
+        if task.audio_type == "ogg":
             sf.write(_file, _audio, sample_rate, format='ogg', subtype='vorbis')
-        elif audio_type == "wav":
+        elif task.audio_type == "wav":
             # Write out audio as 24bit PCM WAV
             sf.write(_file, _audio, sample_rate, format='wav', subtype='PCM_24')
-        elif audio_type == "flac":
+        elif task.audio_type == "flac":
             # Write out audio as 24bit Flac
             sf.write(_file, _audio, sample_rate, format='flac', subtype='PCM_24')
-        elif audio_type == "silk":
+        elif task.audio_type == "silk":
             # Write out audio as 24bit Flac
             byte_io = io.BytesIO(bytes())
             sf.write(byte_io, audio.astype(np.int16), sample_rate)
@@ -282,3 +280,64 @@ class TtsGenerate(object):
         _file.seek(0)
         # 获取 wav 数据
         return _file
+
+    def infer_task_bat(self, task_list: List[InferTask]):
+        """
+        :param task_list 任务列表
+        :return:
+        """
+        # 检查任务列表，确定编码类型和采样率一样
+        for task in task_list:
+            if task.sample_rate != task_list[0].sample_rate:
+                raise Exception("sample_rate must be same")
+            if task.audio_type != task_list[0].audio_type:
+                raise Exception("audio_type must be same")
+        _file_list: List[io.BytesIO] = []
+        for task in task_list:
+            _file_list.append(self.infer_task(task))
+        # 链接音频文件
+        output_signal = np.zeros((0,))
+        for file in _file_list:
+            signal, sample_rate = sf.read(file, dtype='float32')
+            output_signal = np.concatenate((output_signal, signal))
+
+        # 将浮点型数据转换为 PCM_16 格式的字节数组
+        output_signal = (output_signal * 32767).astype(np.int16)
+        output_byte = output_signal.tobytes()
+        # 释放内存
+        del output_signal
+        # 写出返回
+        output_bio = BytesIO(initial_bytes=output_byte)
+        return output_bio
+
+    def create_infer_task(self,
+                          c_text: str,
+                          speaker_ids: int = 0, audio_type: str = "wav", length_scale: float = 1.0,
+                          noise_scale: float = 0.667, noise_scale_w: float = 0.8,
+                          sample_rate: Optional[int] = None
+                          ) -> List[InferTask]:
+        """
+        :param c_text 语句
+        :param speaker_ids 说话人id
+        :param noise_scale 音频噪声
+        :param noise_scale_w 音频噪声权重
+        :param length_scale 音频长度
+        :param sample_rate 采样率
+        :param audio_type 音频类型
+        :return:
+        """
+        _task_list = []
+        parse = Parse()
+        sentence_cell = parse.create_cell(c_text, merge_same=False, cell_limit=140)
+        sentence_task = parse.pack_up_task(sentence_cell=sentence_cell, task_limit=140, strip=True)
+        for sentence in sentence_task:
+            _task_list.append(InferTask(
+                c_text="".join(sentence),
+                speaker_ids=speaker_ids,
+                noise_scale=noise_scale,
+                noise_scale_w=noise_scale_w,
+                length_scale=length_scale,
+                sample_rate=sample_rate,
+                audio_type=audio_type
+            ))
+        return _task_list

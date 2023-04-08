@@ -18,7 +18,7 @@ from loguru import logger
 from component.nlp_utils.detect import DetectSentence
 from component.warp import Parse
 # from celery_worker import tts_order
-from event import TtsGenerate, TtsSchema
+from event import TtsGenerate, TtsSchema, InferTask
 
 # 日志机器
 logger.add(sink='run.log',
@@ -116,23 +116,30 @@ async def tts(tts_req: TtsSchema, auto_parse: bool = False):
     # if tts_req.audio_type not in TtsSchema().audio_type:
     #    raise HTTPException(status_code=400, detail="Audio Type is Invalid!")
     if auto_parse:
-        parse = Parse()
-        tts_req.text = parse.build_vits_sentence(parse.warp_sentence(tts_req.text))
+        _task = server_build.create_infer_task(c_text=tts_req.text,
+                                               speaker_ids=tts_req.speaker_id,
+                                               audio_type=tts_req.audio_type,
+                                               length_scale=tts_req.length_scale,
+                                               noise_scale=tts_req.noise_scale,
+                                               noise_scale_w=tts_req.noise_scale_w
+                                               )
+    else:
+        _task = [InferTask(c_text=tts_req.text,
+                           speaker_ids=tts_req.speaker_id,
+                           audio_type=tts_req.audio_type,
+                           length_scale=tts_req.length_scale,
+                           noise_scale=tts_req.noise_scale,
+                           noise_scale_w=tts_req.noise_scale_w)]
     # 检查 speaker_id 合法性
     if tts_req.speaker_id >= server_build.n_speakers:
         raise HTTPException(status_code=400, detail="Speaker ID is Invalid!")
     try:
-        _result = server_build.infer(c_text=tts_req.text,
-                                     speaker_ids=tts_req.speaker_id,
-                                     audio_type=tts_req.audio_type,
-                                     length_scale=tts_req.length_scale,
-                                     noise_scale=tts_req.noise_scale,
-                                     noise_scale_w=tts_req.noise_scale_w,
-                                     load_prefer=tts_req.load_prefer
-                                     )
+        server_build.load_prefer = tts_req.load_prefer
+        _result = server_build.infer_task_bat(
+            task_list=_task
+        )
     except Exception as e:
-        raise e
-        logger.error(e)
+        logger.exception(e)
         raise HTTPException(status_code=500, detail="Error When Generate Voice!")
     else:
         _result.seek(0)
