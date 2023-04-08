@@ -5,6 +5,7 @@
 model/*.json
 model/*.pth
 model/*.bak
+model/*.onnx
 .idea
 # User-specific files
 *.rsuser
@@ -367,7 +368,7 @@ FodyWeavers.xsd
 
 # build
 build
-monotonic_align/core.c
+onnx_infer/monotonic_align/core.c
 *.o
 *.so
 *.dll

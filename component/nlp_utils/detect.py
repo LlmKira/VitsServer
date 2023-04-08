@@ -23,6 +23,15 @@ class DetectSentence(object):
             from .. import langdetect_fasttext
             lang_type = langdetect_fasttext.detect(text=sentence.replace("\n", "").replace("\r", ""),
                                                    low_memory=True).get("lang").upper()
+
+            def is_japanese(string):
+                for ch in string:
+                    if 0x3040 < ord(ch) < 0x30FF:
+                        return True
+                return False
+
+            if lang_type == "JA" and not is_japanese(sentence):
+                lang_type = "ZH"
         except Exception as e:
             # handle error
             logger.error(e)

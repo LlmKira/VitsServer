@@ -11,17 +11,14 @@
 import pathlib
 
 import psutil
-import rtoml
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel
 
 from component.nlp_utils.detect import DetectSentence
 from component.warp import Parse
 # from celery_worker import tts_order
-from event import TtsGenerate, TtsSchema
+from event import TtsGenerate, TtsSchema, InferTask
 
 # 日志机器
 logger.add(sink='run.log',
@@ -34,12 +31,15 @@ app = FastAPI()
 
 _Model_list = {}
 pathlib.Path("./model").mkdir(parents=True, exist_ok=True)
-for model_path in pathlib.Path("./model").iterdir():
-    if model_path.is_file() and model_path.suffix == ".pth":
-        if pathlib.Path(f"{model_path}.json").exists():
-            _Model_list[model_path.name] = TtsGenerate(model_path=str(model_path))
+for model_config_path in pathlib.Path("./model").iterdir():
+    if model_config_path.is_file() and model_config_path.suffix == ".json":
+        pth_model_path = model_config_path.parent / f'{model_config_path.stem}.pth'
+        onnx_model_path = model_config_path.parent / f'{model_config_path.stem}.onnx'
+        if pathlib.Path(pth_model_path).exists() or pathlib.Path(onnx_model_path).exists():
+            _Model_list[model_config_path.stem] = TtsGenerate(model_config_path=str(model_config_path.absolute()))
+            logger.success(f"载入了 {model_config_path} 对应的模型配置")
         else:
-            logger.warning(f"{model_path} 没有对应的 json 文件")
+            logger.warning(f"{model_config_path} 没有对应的模型文件")
 
 
 # 主页
@@ -116,50 +116,31 @@ async def tts(tts_req: TtsSchema, auto_parse: bool = False):
     # if tts_req.audio_type not in TtsSchema().audio_type:
     #    raise HTTPException(status_code=400, detail="Audio Type is Invalid!")
     if auto_parse:
-        parse = Parse()
-        tts_req.text = parse.build_vits_sentence(parse.warp_sentence(tts_req.text))
+        _task = server_build.create_infer_task(c_text=tts_req.text,
+                                               speaker_ids=tts_req.speaker_id,
+                                               audio_type=tts_req.audio_type,
+                                               length_scale=tts_req.length_scale,
+                                               noise_scale=tts_req.noise_scale,
+                                               noise_scale_w=tts_req.noise_scale_w
+                                               )
+    else:
+        _task = [InferTask(c_text=tts_req.text,
+                           speaker_ids=tts_req.speaker_id,
+                           audio_type=tts_req.audio_type,
+                           length_scale=tts_req.length_scale,
+                           noise_scale=tts_req.noise_scale,
+                           noise_scale_w=tts_req.noise_scale_w)]
     # 检查 speaker_id 合法性
     if tts_req.speaker_id >= server_build.n_speakers:
         raise HTTPException(status_code=400, detail="Speaker ID is Invalid!")
     try:
-        _result = server_build.infer(c_text=tts_req.text,
-                                     speaker_ids=tts_req.speaker_id,
-                                     audio_type=tts_req.audio_type,
-                                     length_scale=tts_req.length_scale,
-                                     noise_scale=tts_req.noise_scale,
-                                     noise_scale_w=tts_req.noise_scale_w,
-                                     load_prefer=tts_req.load_prefer
-                                     )
+        server_build.load_prefer = tts_req.load_prefer
+        _result = server_build.infer_task_bat(
+            task_list=_task
+        )
     except Exception as e:
-        logger.error(e)
+        logger.exception(e)
         raise HTTPException(status_code=500, detail="Error When Generate Voice!")
     else:
         _result.seek(0)
         return StreamingResponse(_result, media_type="application/octet-stream")
-
-
-# Run
-CONF = rtoml.load(open("config.toml", 'r'))
-
-
-class FastApiConf(BaseModel):
-    reload: bool = False
-    host: str = "127.0.0.1"
-    port: int = 0
-    workers: int = 1
-
-
-ServerConf = CONF.get("server") if CONF.get("server") else {}
-FastApi = FastApiConf(**ServerConf)
-
-if FastApi.reload:
-    logger.warning("reload 参数有内容修改自动重启服务器，启用可能导致连续重启导致 CPU 满载")
-
-if __name__ == '__main__':
-    uvicorn.run('server:app',
-                host=FastApi.host,
-                port=FastApi.port,
-                reload=FastApi.reload,
-                log_level="debug",
-                workers=FastApi.workers
-                )

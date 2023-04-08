@@ -30,4 +30,4 @@ COPY --from=builder /usr/local/ /usr/local/
 
 COPY . .
 
-CMD ["python3", "app.py"]
+CMD ["python3", "main.py"]

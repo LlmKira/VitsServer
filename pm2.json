@@ -2,7 +2,7 @@
   "apps": [
     {
       "name": "vits server",
-      "script": "pipenv shell;python3 server.py",
+      "script": "pipenv shell;python3 main.py",
       "instances": 1,
       "error_file": "main_error.log",
       "out_file": "main_out.log",

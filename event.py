@@ -3,23 +3,28 @@
 # @Author  : sudoskys
 # @File    : event.py
 # @Software: PyCharm
+import io
 import re
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
-from typing import Literal
+from typing import Literal, List, Optional
 
+import numpy as np
 # import librosa
 # import numpy as np
 import scipy
 import soundfile as sf
 import torch
 from graiax import silkcoder
+from loguru import logger
 from pydantic import BaseModel
 
-import commons
 import utils
-from models import SynthesizerTrn
+from component.warp import Parse
+from onnx_infer.infer import commons
+from onnx_infer.utils.onnx_utils import RunONNX
+from pth2onnx import VitsExtractor
 from text import text_to_sequence
 
 
@@ -40,6 +45,16 @@ class TtsSchema(BaseModel):
     noise_scale_w: float = 0.8
     sample_rate: int = 22050
     load_prefer: bool = True
+
+
+class InferTask(BaseModel):
+    c_text: str
+    speaker_ids: int = 0
+    audio_type: Literal["ogg", "wav", "flac", "silk"] = "wav"
+    length_scale: float = 1.0
+    noise_scale: float = 0.667
+    noise_scale_w: float = 0.8
+    sample_rate: int = None
 
 
 class ParseText(object):
@@ -103,9 +118,14 @@ class ParseText(object):
 
 
 class TtsGenerate(object):
-    def __init__(self, model_path: str, model_config_path: str = None, device: str = "cpu"):
-        self.model_path = model_path
-        self.model_config_path = model_config_path if model_config_path else f"{model_path}.json"
+    """
+    批次语音合成技术
+    """
+
+    def __init__(self, model_config_path: str, model_path: str = None, device: str = "cpu", load_prefer: bool = True):
+        self.load_prefer = load_prefer
+        self.model_config_path = model_config_path
+        self.model_path = model_path if model_path else None
         self.device = device
 
         self._out_path = f"./tts/{0}.wav"
@@ -126,16 +146,26 @@ class TtsGenerate(object):
 
     def load_model(self):
         # 判定是否存在模型
-        if not Path(self.model_path).exists() or not Path(self.model_config_path).exists():
+        if not Path(self.model_config_path).exists():
             return None
-        model = SynthesizerTrn(
-            len(self.hps_ms_config.symbols),
-            self.hps_ms_config.data.filter_length // 2 + 1,
-            self.hps_ms_config.train.segment_size // self.hps_ms_config.data.hop_length,
-            n_speakers=self.hps_ms_config.data.n_speakers,
-            **self.hps_ms_config.model)
-        utils.load_checkpoint(self.model_path, model)
-        model.eval().to(torch.device(self.device))
+        try:
+            _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
+        except Exception as e:
+            logger.error(f"Model Not Found Or Convert Error: {e}")
+            return None
+        model = RunONNX(model=_vits_base, providers=['CPUExecutionProvider'])
+        # model = onnx_infer.SynthesizerTrn(
+        #     len(self.hps_ms_config.symbols),
+        #     self.hps_ms_config.data.filter_length // 2 + 1,
+        #     self.hps_ms_config.train.segment_size // self.hps_ms_config.data.hop_length,
+        #     onnx_model=_vits_base,
+        #     n_speakers=self.hps_ms_config.data.n_speakers,
+        #     **self.hps_ms_config.model
+        # )
+        # utils.load_checkpoint(self.model_path, model, None)
+        # model.eval()
+        # utils.load_checkpoint(self.model_path, model)
+        # model.eval().to(torch.device(self.device))
         return model
 
     @property
@@ -184,53 +214,23 @@ class TtsGenerate(object):
             id_list.append({"id": ids, "name": name})
         return id_list
 
-    def find_speaker(self, speaker_ids: int):
-        # 确定 ID
-        _msg = "ok"
-        find = False
-        speaker_name = "none"
-        speaker_list = self.get_speaker_list()
-        for item in speaker_list:
-            if speaker_ids == item["id"]:
-                speaker_name = item['name']
-                find = True
-        if not find:
-            # speaker_ids = speaker_list[0]["id"]
-            speaker_name = speaker_list[0]["name"]
-            _msg = "Not Find Speaker,Use 0"
-        return _msg, speaker_name
-
     def infer(self,
-              c_text: str,
-              speaker_ids: int = 0,
-              audio_type: str = Literal["ogg", "wav", "flac", "silk"],
-              length_scale: float = 1,
-              noise_scale: float = 0.667,
-              noise_scale_w: float = 0.8,
-              sample_rate: int = None,
-              load_prefer: bool = True,
+              task: InferTask = None,
               ):
         """
-        :param c_text: 文本
-        :param speaker_ids: 角色ID，0为默认
-        :param audio_type: 音频类型，ogg/wav/flac/silk
-        :param length_scale: 长度缩放，决定了音频时长
-        :param noise_scale: 噪声缩放，决定了音频噪声
-        :param noise_scale_w: 噪声缩放宽度
-        :param sample_rate: 采样率
-        :param load_prefer: 是否加载模型偏好
+        :param task 任务
         :return:
         """
-        c_text = ParseText().clean_text(c_text)
-        _stn_tst = ParseText().get_stn_tst(c_text, self.hps_ms_config)
+        task.c_text = ParseText().clean_text(task.c_text)
+        _stn_tst = ParseText().get_stn_tst(task.c_text, self.hps_ms_config)
 
         # 读模型偏好
-        if load_prefer:
-            noise_scale, noise_scale_w, length_scale = self.load_prefer_noise(self.hps_ms_config,
-                                                                              noise_scale,
-                                                                              noise_scale_w,
-                                                                              length_scale
-                                                                              )
+        if self.load_prefer:
+            task.noise_scale, task.noise_scale_w, task.length_scale = self.load_prefer_noise(self.hps_ms_config,
+                                                                                             task.noise_scale,
+                                                                                             task.noise_scale_w,
+                                                                                             task.length_scale
+                                                                                             )
         # 规则化文本覆盖
         # length_scale, noise_scale, noise_scale_w = ParseText().parse(c_text,
         #                                                             length=length_scale,
@@ -238,13 +238,26 @@ class TtsGenerate(object):
         #                                                             noise_w=noise_scale_w)
         # 构造对应 tensor
         with torch.no_grad():
-            _x_tst = _stn_tst.unsqueeze(0)
-            _x_tst_lengths = torch.LongTensor([_stn_tst.size(0)])
-            _sid = torch.LongTensor([speaker_ids])
-            _audio = self.net_g_ms.infer(_x_tst, _x_tst_lengths, sid=_sid,
-                                         noise_scale=noise_scale,
-                                         noise_scale_w=noise_scale_w,
-                                         length_scale=1.0 / length_scale)[0][0, 0].data.cpu().float().numpy()
+            _x_tst = _stn_tst.unsqueeze(0).numpy()
+            _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
+            _sid = np.array([task.speaker_ids], dtype=np.int64)
+            scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
+            scales.resize(1, 3)
+            ort_inputs = {
+                'input': _x_tst,
+                'input_lengths': _x_tst_lengths,
+                'scales': scales,
+                'sid': _sid
+            }
+            audio = np.squeeze(self.net_g_ms.run(model_input=ort_inputs))
+            audio *= 32767.0 / max(0.01, np.max(np.abs(audio))) * 0.6
+            audio = np.clip(audio, -32767.0, 32767.0)
+            _audio = audio.astype(np.int16)
+        # 释放内存
+        del _stn_tst, _x_tst, _x_tst_lengths, _sid
+        return _audio
+
+    def encode_audio(self, audio, sample_rate, audio_type):
         # 写出返回
         _file = BytesIO()
         sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
@@ -252,18 +265,89 @@ class TtsGenerate(object):
         sample_rate = 24000 if sample_rate < 0 else sample_rate
         # 使用 scipy 将 Numpy 数据写入字节流
         if audio_type == "ogg":
-            sf.write(_file, _audio, sample_rate, format='ogg', subtype='vorbis')
+            sf.write(_file, audio, sample_rate, format='ogg', subtype='vorbis')
         elif audio_type == "wav":
             # Write out audio as 24bit PCM WAV
-            sf.write(_file, _audio, sample_rate, format='wav', subtype='PCM_24')
+            sf.write(_file, audio, sample_rate, format='wav', subtype='PCM_24')
         elif audio_type == "flac":
             # Write out audio as 24bit Flac
-            sf.write(_file, _audio, sample_rate, format='flac', subtype='PCM_24')
+            sf.write(_file, audio, sample_rate, format='flac', subtype='PCM_24')
         elif audio_type == "silk":
             # Write out audio as 24bit Flac
-            _file = BytesIO(initial_bytes=silkcoder.encode(_audio))
+            byte_io = io.BytesIO(bytes())
+            sf.write(byte_io, audio, sample_rate)
+            _file = BytesIO(initial_bytes=silkcoder.encode(byte_io))
+            del byte_io
         else:
-            scipy.io.wavfile.write(_file, sample_rate, _audio)
+            scipy.io.wavfile.write(_file, sample_rate, audio)
         _file.seek(0)
+        return _file
+
+    def infer_task(self,
+                   task: InferTask = None,
+                   ):
+        """
+        :param task 任务
+        :return:
+        """
+        _audio = self.infer(task=task)
+        _file = self.encode_audio(_audio, task.sample_rate, task.audio_type)
         # 获取 wav 数据
         return _file
+
+    def infer_task_bat(self, task_list: List[InferTask]):
+        """
+        :param task_list 任务列表
+        :return:
+        """
+        # 检查任务列表，确定编码类型和采样率一样
+        for task in task_list:
+            if task.sample_rate != task_list[0].sample_rate:
+                raise Exception("sample_rate must be same")
+            if task.audio_type != task_list[0].audio_type:
+                raise Exception("audio_type must be same")
+        # 批量推理
+        _file = []
+        for task in task_list:
+            _audio = self.infer(task=task)
+            _file.append(_audio)
+        # 合并音频
+        audio_data = np.concatenate(_file, axis=0)
+        return self.encode_audio(audio_data, task_list[0].sample_rate, task_list[0].audio_type)
+
+    def create_infer_task(self,
+                          c_text: str,
+                          speaker_ids: int = 0, audio_type: str = "wav", length_scale: float = 1.0,
+                          noise_scale: float = 0.667, noise_scale_w: float = 0.8,
+                          sample_rate: Optional[int] = None
+                          ) -> List[InferTask]:
+        """
+        :param c_text 语句
+        :param speaker_ids 说话人id
+        :param noise_scale 音频噪声
+        :param noise_scale_w 音频噪声权重
+        :param length_scale 音频长度
+        :param sample_rate 采样率
+        :param audio_type 音频类型
+        :return:
+        """
+        _task_list = []
+        parse = Parse()
+        sentence_cell = parse.create_cell(c_text, merge_same=False, cell_limit=140)
+        sentence_task = parse.pack_up_task(sentence_cell=sentence_cell, task_limit=140, strip=True)
+        for sentence in sentence_task:
+            last = InferTask(
+                c_text="".join(sentence),
+                speaker_ids=speaker_ids,
+                noise_scale=noise_scale,
+                noise_scale_w=noise_scale_w,
+                length_scale=length_scale,
+                sample_rate=sample_rate,
+                audio_type=audio_type
+            )
+            _task_list.append(last)
+        # TEST
+        # test = last.copy()
+        # test.c_text = "[ZH]测试,多任务正常工作[ZH]"
+        # _task_list.append(test)
+        return _task_list

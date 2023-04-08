@@ -1,12 +1,13 @@
-import logging
+import os
 from json import loads
 
 import librosa
+from loguru import logger
 from numpy import float32
 from torch import load, FloatTensor
 
 
-class HParams():
+class HParams(object):
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             if type(v) == dict:
@@ -38,9 +39,13 @@ class HParams():
         return self.__dict__.__repr__()
 
 
-def load_checkpoint(checkpoint_path, model):
+def load_checkpoint(checkpoint_path, model, optimizer=None):
+    assert os.path.isfile(checkpoint_path)
     checkpoint_dict = load(checkpoint_path, map_location='cpu')
     iteration = checkpoint_dict['iteration']
+    learning_rate = checkpoint_dict['learning_rate']
+    if optimizer is not None:
+        optimizer.load_state_dict(checkpoint_dict['optimizer'])
     saved_state_dict = checkpoint_dict['model']
     if hasattr(model, 'module'):
         state_dict = model.module.state_dict()
@@ -51,15 +56,15 @@ def load_checkpoint(checkpoint_path, model):
         try:
             new_state_dict[k] = saved_state_dict[k]
         except:
-            logging.info("%s is not in the checkpoint" % k)
+            logger.info("%s is not in the checkpoint" % k)
             new_state_dict[k] = v
     if hasattr(model, 'module'):
         model.module.load_state_dict(new_state_dict)
     else:
         model.load_state_dict(new_state_dict)
-    logging.info("Loaded checkpoint '{}' (iteration {})".format(
+    logger.info("Loaded checkpoint '{}' (iteration {})".format(
         checkpoint_path, iteration))
-    return
+    return model, optimizer, learning_rate, iteration
 
 
 def get_hparams_from_file(config_path):
