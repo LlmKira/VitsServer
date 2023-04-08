@@ -107,6 +107,10 @@ class ParseText(object):
 
 
 class TtsGenerate(object):
+    """
+    批次语音合成技术
+    """
+
     def __init__(self, model_config_path: str, model_path: str = None, device: str = "cpu"):
         self.model_config_path = model_config_path
         self.model_path = model_path if model_path else None
@@ -198,22 +202,6 @@ class TtsGenerate(object):
             id_list.append({"id": ids, "name": name})
         return id_list
 
-    def find_speaker(self, speaker_ids: int):
-        # 确定 ID
-        _msg = "ok"
-        find = False
-        speaker_name = "none"
-        speaker_list = self.get_speaker_list()
-        for item in speaker_list:
-            if speaker_ids == item["id"]:
-                speaker_name = item['name']
-                find = True
-        if not find:
-            # speaker_ids = speaker_list[0]["id"]
-            speaker_name = speaker_list[0]["name"]
-            _msg = "Not Find Speaker,Use 0"
-        return _msg, speaker_name
-
     def infer(self,
               c_text: str,
               speaker_ids: int = 0,
@@ -255,7 +243,7 @@ class TtsGenerate(object):
             _x_tst = _stn_tst.unsqueeze(0).numpy()
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
             _sid = np.array([speaker_ids], dtype=np.int64)
-            scales = np.array([noise_scale, noise_scale_w, 1.0 /length_scale], dtype=np.float32)
+            scales = np.array([noise_scale, noise_scale_w, 1.0 / length_scale], dtype=np.float32)
             scales.resize(1, 3)
             ort_inputs = {
                 'input': _x_tst,
