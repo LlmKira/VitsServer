@@ -57,6 +57,8 @@ export VITS_SERVER_PORT="9557"
 export VITS_SERVER_RELOAD="false"
 ```
 
+`VITS_SERVER_RELOAD` means auto restart server when file changed.
+
 ### Running from pipenv 🐍
 
 ```shell
