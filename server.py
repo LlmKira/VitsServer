@@ -131,6 +131,7 @@ async def tts(tts_req: TtsSchema, auto_parse: bool = False):
                                      load_prefer=tts_req.load_prefer
                                      )
     except Exception as e:
+        raise e
         logger.error(e)
         raise HTTPException(status_code=500, detail="Error When Generate Voice!")
     else:
