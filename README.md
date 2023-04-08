@@ -39,16 +39,25 @@ with open("output.wav", "wb") as f:
 We recommend using a virtual environment to isolate the runtime environment. Because this project's dependencies may
 potentially disrupt your dependency library, we recommend using `pipenv` to manage the dependency package.
 
-### Testing from Shell 🐚
+### Config Server 🐚
 
-Configuration is in config.toml, including the following fields:
+Configuration is in `.env`, including the following fields:
 
-```toml
-[server]
-host = '0.0.0.0'
-port = 9557
-reload = false
+```dotenv
+VITS_SERVER_HOST=0.0.0.0
+VITS_SERVER_PORT=9557
+VITS_SERVER_RELOAD=false
 ```
+
+or you can use the following command to set the environment variable:
+
+```shell
+export VITS_SERVER_HOST="0.0.0.0"
+export VITS_SERVER_PORT="9557"
+export VITS_SERVER_RELOAD="false"
+```
+
+#### Running from pipenv 🐍
 
 ```shell
 apt install python3-pip
