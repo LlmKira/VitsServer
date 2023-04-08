@@ -1,19 +1,42 @@
-# Vits-Server
+# Vits-Server 🔥
 
-## 优势
+⚡ A VITS ONNX server designed for fast inference, supporting streaming and additional inference settings to enable model
+preference settings and optimize performance.
 
-- 自动解析文本的语言类型，无需处理语言识别切分。
-- 支持多种音频格式，包括ogg、wav、flac、silk。
-- 多模型，流式传输。
-- 额外推理设置，为模型启用偏好设置，提升效果。
+[![Docker](https://github.com/LlmKira/VitsServer/actions/workflows/docker-latest.yaml/badge.svg)](https://github.com/LlmKira/VitsServer/actions/workflows/docker-latest.yaml)
 
-## 运行
+## Advantages 💪
 
-推荐使用虚拟环境隔离运行环境。因为本项目依赖有可能破坏您的依赖库，所以推荐使用 `pipenv` 来管理依赖包。
+- Automatic language type parsing for text, eliminating the need for language recognition segmentation.
+- Supports multiple audio formats, including ogg, wav, flac, and silk.
+- Multiple models, streaming inference.
+- Additional inference settings to enable model preference settings and optimize performance.
 
-### 从 Shell 测试
+## API Documentation 📖
 
-配置在 config.toml 中，包括以下字段：
+We offer out-of-the-box call systems.
+
+- [Python SDK](docs/sdk.py)
+- [JavaScript SDK](docs/sdk.js)
+
+```python
+client = VITS("http://127.0.0.1:9557")
+res = client.generate_voice(model_id="model_01", text="你好，世界！", speaker_id=0, audio_type="wav",
+                            length_scale=1.0, noise_scale=0.5, noise_scale_w=0.5, auto_parse=True)
+with open("output.wav", "wb") as f:
+    for chunk in res.iter_content(chunk_size=1024):
+        if chunk:
+            f.write(chunk)
+```
+
+## Running 🏃
+
+We recommend using a virtual environment to isolate the runtime environment. Because this project's dependencies may
+potentially disrupt your dependency library, we recommend using `pipenv` to manage the dependency package.
+
+### Testing from Shell 🐚
+
+Configuration is in config.toml, including the following fields:
 
 ```toml
 [server]
@@ -25,40 +48,47 @@ reload = false
 ```shell
 apt install python3-pip
 pip3 install pipenv
-pipenv install           # 创建并安装依赖包
-pipenv shell             # 激活虚拟环境
-python3 server.py          # 运行
+pipenv install    # Create and install dependency packages
+pipenv shell      # Activate the virtual environment
+python3 server.py # Run
+
 ```
 
-### 从 pm2.json 运行
+### Running from pm2.json 🚀
 
 ```shell
+apt-get update &&
+  apt-get install -y build-essential libsndfile1 vim gcc g++ cmake &&
+  python3 -m pip install -r requirements.txt
 apt install npm
 npm install pm2 -g
 pm2 start pm2.json
+
 ```
 
-### 从 Docker 构建
+### Building from Docker 🐋
 
 ```shell
-docker build -t <镜像名称> .
+docker build -t <image-name> .
 ```
 
-其中 <镜像名称> 是您想要给该镜像命名的名称。然后，使用以下命令将容器启动起来：
+where `<image-name>` is the name you want to give to the image. Then, use the following command to start the container:
 
 ```shell
-docker run -it -p 9557:9557 -v <本地路径>/vits_model:/app/model <镜像名称>
+docker run -it -p 9557:9557 -v <local-path>/vits_model:/app/model <image-name>
 ```
 
-其中 <本地路径> 是您想要映射到容器中 /app/model 目录的本地文件夹路径。
+where `<local-path>` is the local folder path you want to map to the /app/model directory in the container.
 
-## 模型配置
+## Model Configuration 📁
 
-在 `model` 文件夹下，放入 `model.pth`/ `model.onnx` 和对应的 `model.json` 文件即可。如果是 `.pth` ，会自动转换为 `.onnx`！
+In the `model` folder, place the `model.pth`/ `model.onnx` and corresponding `model.json` files. If it is `.pth`, it
+will be automatically converted to `.onnx`!
 
-### 模型扩展设计
+### Model Extension Design 🔍
 
-你可以在模型配置中加入额外的字段，通过Api获取模型ID对应的模型名称等信息。
+You can add extra fields in the model configuration to obtain information such as the model name corresponding to the
+model ID through the API.
 
 ```json5
 {
@@ -79,10 +109,7 @@ docker run -it -p 9557:9557 -v <本地路径>/vits_model:/app/model <镜像名�
 }
 ```
 
-## API文档
+### How can I retrieve model information?
 
-我们提供开箱即用的调用系统。
-
-- [Python SDK](docs/sdk.py)
-- [JavaScript SDK](docs/sdk.js)
-
+You can access f"{self.base_url}/model/list?show_speaker=True&show_ms_config=True" to obtain detailed information about
+model roles and configurations.
