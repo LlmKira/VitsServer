@@ -272,6 +272,7 @@ class TtsGenerate(object):
         sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
         sample_rate = int(sample_rate)
         sample_rate = 24000 if sample_rate < 0 else sample_rate
+
         if audio_type == "ogg":
             sf.write(_file, audio, sample_rate, format='ogg', subtype='vorbis')
         elif audio_type == "wav":

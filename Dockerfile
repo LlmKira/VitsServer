@@ -8,12 +8,17 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && \
-    apt-get install -y build-essential libsndfile1 vim gcc g++ cmake gfortran libopenblas-dev liblapack-dev cython && \
-    python3 -m pip install --upgrade pip numpy numba scipy
+    apt-get install -y build-essential libsndfile1 vim gcc g++ cmake
+
+RUN python3 -m pip install Cython --install-option="--no-cython-compile"
+
+# These are some packages who will take a lot of time to build
+RUN python3 -m pip install --upgrade pip numpy numba pyopenjtalk
 
 WORKDIR /build
 
 COPY requirements.txt .
+
 RUN python3 -m pip install -r requirements.txt
 
 # Stage 2 - Runtime image
