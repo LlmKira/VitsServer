@@ -57,7 +57,7 @@ export VITS_SERVER_PORT="9557"
 export VITS_SERVER_RELOAD="false"
 ```
 
-#### Running from pipenv 🐍
+### Running from pipenv 🐍
 
 ```shell
 apt install python3-pip
