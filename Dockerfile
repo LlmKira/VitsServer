@@ -10,7 +10,10 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && \
     apt-get install -y build-essential libsndfile1 vim gcc g++ cmake
 
-RUN python3 -m pip install --upgrade pip numpy numba
+RUN python3 -m pip install Cython --install-option="--no-cython-compile"
+
+# These are some packages who will take a lot of time to build
+RUN python3 -m pip install --upgrade pip numpy numba pyopenjtalk
 
 WORKDIR /build
 

@@ -1,9 +1,14 @@
+![cover.png](docs/cover.png)
+
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-BSD3-green)](LICENSE)
+[![Docker](https://github.com/LlmKira/VitsServer/actions/workflows/docker-latest.yaml/badge.svg)](https://github.com/LlmKira/VitsServer/actions/workflows/docker-latest.yaml)
+------
+
 # Vits-Server 🔥
 
 ⚡ A VITS ONNX server designed for fast inference, supporting streaming and additional inference settings to enable model
 preference settings and optimize performance.
-
-[![Docker](https://github.com/LlmKira/VitsServer/actions/workflows/docker-latest.yaml/badge.svg)](https://github.com/LlmKira/VitsServer/actions/workflows/docker-latest.yaml)
 
 ## Advantages 💪
 
