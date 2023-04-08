@@ -17,14 +17,28 @@ def set_random_seed(seed=0):
     np.random.seed(seed)
 
 
-def runonnx(model, **kwargs):
-    # 如果是 ByteIO 类，则转换为 bytes
-    if hasattr(model, "getvalue"):
-        model = model.getvalue()
-    # 创造运行时
-    ort_session = ort.InferenceSession(model)
-    outputs = ort_session.run(
-        None,
-        kwargs
-    )
-    return outputs
+class RunONNX(object):
+    def __init__(self, model=None,
+                 providers=None):
+        self.ort_session = None
+        if model:
+            self.load(model, providers=providers)
+
+    def load(self,
+             model,
+             providers=None
+             ):
+        # 如果是 ByteIO 类，则转换为 bytes
+        if providers is None:
+            providers = ['CPUExecutionProvider']
+        if hasattr(model, "getvalue"):
+            model = model.getvalue()
+        # 创造运行时
+        self.ort_session = ort.InferenceSession(model, providers=providers)
+
+    def run(self, model_input):
+        outputs = self.ort_session.run(
+            None,
+            input_feed=model_input
+        )
+        return outputs

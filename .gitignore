@@ -367,7 +367,7 @@ FodyWeavers.xsd
 
 # build
 build
-monotonic_align/core.c
+onnx_infer/monotonic_align/core.c
 *.o
 *.so
 *.dll

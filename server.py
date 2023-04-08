@@ -34,12 +34,14 @@ app = FastAPI()
 
 _Model_list = {}
 pathlib.Path("./model").mkdir(parents=True, exist_ok=True)
-for model_path in pathlib.Path("./model").iterdir():
-    if model_path.is_file() and model_path.suffix == ".pth":
-        if pathlib.Path(f"{model_path}.json").exists():
-            _Model_list[model_path.name] = TtsGenerate(model_path=str(model_path))
+for model_config_path in pathlib.Path("./model").iterdir():
+    if model_config_path.is_file() and model_config_path.suffix == ".json":
+        pth_model_path = model_config_path.parent / f'{model_config_path.stem}.pth'
+        onnx_model_path = model_config_path.parent / f'{model_config_path.stem}.onnx'
+        if pathlib.Path(pth_model_path).exists() or pathlib.Path(onnx_model_path).exists():
+            _Model_list[model_config_path.stem] = TtsGenerate(model_config_path=str(model_config_path.absolute()))
         else:
-            logger.warning(f"{model_path} 没有对应的 json 文件")
+            logger.warning(f"{model_config_path} 没有对应的模型文件")
 
 
 # 主页

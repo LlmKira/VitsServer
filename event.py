@@ -3,23 +3,26 @@
 # @Author  : sudoskys
 # @File    : event.py
 # @Software: PyCharm
+import io
 import re
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 # import librosa
 # import numpy as np
 import scipy
 import soundfile as sf
 import torch
 from graiax import silkcoder
+from loguru import logger
 from pydantic import BaseModel
 
 import utils
-from onnx_infer import onnx_infer
 from onnx_infer.infer import commons
+from onnx_infer.utils.onnx_utils import RunONNX
 from pth2onnx import VitsExtractor
 from text import text_to_sequence
 
@@ -104,9 +107,9 @@ class ParseText(object):
 
 
 class TtsGenerate(object):
-    def __init__(self, model_path: str, model_config_path: str = None, device: str = "cpu"):
-        self.model_path = model_path
-        self.model_config_path = model_config_path if model_config_path else f"{model_path}.json"
+    def __init__(self, model_config_path: str, model_path: str = None, device: str = "cpu"):
+        self.model_config_path = model_config_path
+        self.model_path = model_path if model_path else None
         self.device = device
 
         self._out_path = f"./tts/{0}.wav"
@@ -127,19 +130,24 @@ class TtsGenerate(object):
 
     def load_model(self):
         # 判定是否存在模型
-        if not Path(self.model_path).exists() or not Path(self.model_config_path).exists():
+        if not Path(self.model_config_path).exists():
             return None
-        _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
-        model = onnx_infer.SynthesizerTrn(
-            len(self.hps_ms_config.symbols),
-            self.hps_ms_config.data.filter_length // 2 + 1,
-            self.hps_ms_config.train.segment_size // self.hps_ms_config.data.hop_length,
-            onnx_model=_vits_base,
-            n_speakers=self.hps_ms_config.data.n_speakers,
-            **self.hps_ms_config.model
-        )
-        utils.load_checkpoint(self.model_path, model,None)
-        model.eval()
+        try:
+            _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
+        except Exception as e:
+            logger.error(f"Model Not Found Or Convert Error: {e}")
+            return None
+        model = RunONNX(model=_vits_base, providers=['CPUExecutionProvider'])
+        # model = onnx_infer.SynthesizerTrn(
+        #     len(self.hps_ms_config.symbols),
+        #     self.hps_ms_config.data.filter_length // 2 + 1,
+        #     self.hps_ms_config.train.segment_size // self.hps_ms_config.data.hop_length,
+        #     onnx_model=_vits_base,
+        #     n_speakers=self.hps_ms_config.data.n_speakers,
+        #     **self.hps_ms_config.model
+        # )
+        # utils.load_checkpoint(self.model_path, model, None)
+        # model.eval()
         # utils.load_checkpoint(self.model_path, model)
         # model.eval().to(torch.device(self.device))
         return model
@@ -243,14 +251,25 @@ class TtsGenerate(object):
         #                                                             noise=noise_scale,
         #                                                             noise_w=noise_scale_w)
         # 构造对应 tensor
+        if self.hps_ms_config.data.add_blank:
+            _stn_tst = commons.intersperse(_stn_tst, 0)
         with torch.no_grad():
-            _x_tst = _stn_tst.unsqueeze(0)
-            _x_tst_lengths = torch.LongTensor([_stn_tst.size(0)])
-            _sid = torch.LongTensor([speaker_ids])
-            _audio = self.net_g_ms.infer(_x_tst, _x_tst_lengths, sid=_sid,
-                                         noise_scale=noise_scale,
-                                         noise_scale_w=noise_scale_w,
-                                         length_scale=1.0 / length_scale)[0][0, 0].data.cpu().float().numpy()
+            _x_tst = np.array([_stn_tst], dtype=np.int64)
+            # _x_tst = _stn_tst.unsqueeze(0)
+            _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
+            _sid = np.array([speaker_ids], dtype=np.int64)
+            scales = np.array([noise_scale, noise_scale_w, length_scale], dtype=np.float32)
+            scales.resize(1, 3)
+            ort_inputs = {
+                'input': _x_tst,
+                'input_lengths': _x_tst_lengths,
+                'scales': scales,
+                'sid': _sid
+            }
+            audio = np.squeeze(self.net_g_ms.run(model_input=ort_inputs))
+            audio *= 32767.0 / max(0.01, np.max(np.abs(audio))) * 0.6
+            audio = np.clip(audio, -32767.0, 32767.0)
+            _audio = audio.astype(np.int16)
         # 释放内存
         del _stn_tst, _x_tst, _x_tst_lengths, _sid
         # 写出返回
@@ -269,7 +288,10 @@ class TtsGenerate(object):
             sf.write(_file, _audio, sample_rate, format='flac', subtype='PCM_24')
         elif audio_type == "silk":
             # Write out audio as 24bit Flac
-            _file = BytesIO(initial_bytes=silkcoder.encode(_audio))
+            byte_io = io.BytesIO(bytes())
+            sf.write(byte_io, audio.astype(np.int16), sample_rate)
+            _file = BytesIO(initial_bytes=silkcoder.encode(byte_io))
+            del byte_io
         else:
             scipy.io.wavfile.write(_file, sample_rate, _audio)
         _file.seek(0)

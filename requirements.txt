@@ -32,3 +32,4 @@ chardet
 onnx
 onnxruntime
 loguru
+monotonic_align
