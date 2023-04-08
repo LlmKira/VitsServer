@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && \
-    apt-get install -y build-essential libsndfile1 vim gcc g++ cmake gfortran && \
+    apt-get install -y build-essential libsndfile1 vim gcc g++ cmake gfortran libopenblas-dev liblapack-dev cython && \
     python3 -m pip install --upgrade pip numpy numba scipy
 
 WORKDIR /build
