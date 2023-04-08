@@ -41,7 +41,8 @@ class Parse(object):
                     sentence: str,
                     merge_same: bool = True,
                     cell_limit: int = 150,
-                    filiter_space: bool = True) -> list:
+                    filter_space: bool = True
+                    ) -> list:
         """
         分句，识别语言
         :param sentence: 句子
@@ -54,7 +55,7 @@ class Parse(object):
         _cut_list = []
         for _cut in cut_list:
             if len(_cut) > cell_limit:
-                _text_list = [text[i:i + cell_limit] for i in range(0, len(text), cell_limit)]
+                _text_list = [_cut[i:i + cell_limit] for i in range(0, len(_cut), cell_limit)]
                 _cut_list.extend(_text_list)
             else:
                 _cut_list.append(_cut)
@@ -62,7 +63,7 @@ class Parse(object):
         _result = []
         for _cut in _cut_list:
             _lang = Detector.detect_language(_cut)
-            if not filiter_space:
+            if not filter_space:
                 _result.append({"text": _cut, "lang": _lang, "length": len(_cut)})
             else:
                 if _lang:
