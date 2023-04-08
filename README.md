@@ -66,7 +66,7 @@ apt install python3-pip
 pip3 install pipenv
 pipenv install    # Create and install dependency packages
 pipenv shell      # Activate the virtual environment
-python3 server.py # Run
+python3 main.py # Run
 
 ```
 
