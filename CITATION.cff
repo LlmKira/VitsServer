@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "GitHub - LlmKira/VitsServer: 🌻 A VITS ONNX server designed for fast inference"
+abstract: This repository contains the source code for VitsServer, a server designed for fast inference of ONNX models in the VITS format.
+authors:
+  - name: LlmKira
+    type: Organization
+    url: https://github.com/LlmKira
+keywords:
+- vits
+- onnx
+version: 1.0.0
+date-released: 2023-04-01
+url: https://github.com/LlmKira/VitsServer
+citation:
+  - text: "LlmKira (2023). GitHub - LlmKira/VitsServer: 🌻 A VITS ONNX server designed for fast inference. GitHub."
+    doi:
+  - text: "LlmKira. (2023). VitsServer [Source code]. GitHub. https://github.com/LlmKira/VitsServer"
+    doi:
+license: BSD-3-Clause
+repository-code: https://github.com/LlmKira/VitsServer

@@ -13,7 +13,6 @@ from typing import Literal, List, Optional
 import numpy as np
 # import librosa
 # import numpy as np
-import scipy
 import soundfile as sf
 import torch
 from graiax import silkcoder
@@ -90,6 +89,7 @@ class ParseText(object):
             text_norm = text_to_sequence(text, hps.symbols, hps.data.text_cleaners)
         if hps.data.add_blank:
             text_norm = commons.intersperse(text_norm, 0)
+        # text_norm = np.array(text_norm, dtype=np.int64)
         text_norm = torch.LongTensor(text_norm)
         return text_norm
 
@@ -243,6 +243,15 @@ class TtsGenerate(object):
             _sid = np.array([task.speaker_ids], dtype=np.int64)
             scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
             scales.resize(1, 3)
+            """
+            _x_tst = _stn_tst[np.newaxis, :].astype(np.float32)
+            _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)
+            _sid = np.array([task.speaker_ids], dtype=np.int64)
+            scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
+            scales.resize(1, 3)
+            _x_tst = _x_tst.astype(np.int64)
+            _x_tst_lengths = _x_tst_lengths.astype(np.int64)
+            """
             ort_inputs = {
                 'input': _x_tst,
                 'input_lengths': _x_tst_lengths,
@@ -263,7 +272,6 @@ class TtsGenerate(object):
         sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
         sample_rate = int(sample_rate)
         sample_rate = 24000 if sample_rate < 0 else sample_rate
-        # 使用 scipy 将 Numpy 数据写入字节流
         if audio_type == "ogg":
             sf.write(_file, audio, sample_rate, format='ogg', subtype='vorbis')
         elif audio_type == "wav":
@@ -279,7 +287,7 @@ class TtsGenerate(object):
             _file = BytesIO(initial_bytes=silkcoder.encode(byte_io))
             del byte_io
         else:
-            scipy.io.wavfile.write(_file, sample_rate, audio)
+            sf.write(_file, audio, sample_rate, format='wav', subtype='PCM_24')
         _file.seek(0)
         return _file
 

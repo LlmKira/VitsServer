@@ -86,17 +86,20 @@ def tts_model_info(model_id: str):
 
 # 处理传入文本为Vits格式包装
 @app.post("/tts/parse")
-def tts_parse(text: str, strip: bool = False):
+def tts_parse(text: str, strip: bool = False,
+              merge_same: bool = False, cell_limit: int = 140,
+              filter_space: bool = True):
     _result = {}
     try:
         parse = Parse()
-        _merge = parse.warp_sentence(text)
+        _merge = parse.create_cell(sentence=text, merge_same=merge_same, cell_limit=cell_limit,
+                                   filter_space=filter_space)
         _result["detect_code"] = DetectSentence.detect_code(text)
         _result["parse"] = _merge
         _result["raw_text"] = text
-        _result["result"] = parse.build_vits_sentence(_merge, strip=strip)
+        _result["result"] = parse.build_sentence(_merge, strip=strip)
     except Exception as e:
-        logger.error(e)
+        logger.exception(e)
         # raise HTTPException(status_code=500, detail="Error When Process Text!")
         return {"code": -1, "message": "Error!", "data": {}}
     return {"code": 0, "message": "success", "data": _result}
