@@ -214,9 +214,9 @@ class TtsGenerate(object):
             id_list.append({"id": ids, "name": name})
         return id_list
 
-    def infer_task(self,
-                   task: InferTask = None,
-                   ):
+    def infer(self,
+              task: InferTask = None,
+              ):
         """
         :param task 任务
         :return:
@@ -255,29 +255,43 @@ class TtsGenerate(object):
             _audio = audio.astype(np.int16)
         # 释放内存
         del _stn_tst, _x_tst, _x_tst_lengths, _sid
+        return _audio
+
+    def encode_audio(self, audio, sample_rate, audio_type):
         # 写出返回
         _file = BytesIO()
-        sample_rate = self.hps_ms_config.data.sampling_rate if not task.sample_rate else task.sample_rate
+        sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
         sample_rate = int(sample_rate)
         sample_rate = 24000 if sample_rate < 0 else sample_rate
         # 使用 scipy 将 Numpy 数据写入字节流
-        if task.audio_type == "ogg":
-            sf.write(_file, _audio, sample_rate, format='ogg', subtype='vorbis')
-        elif task.audio_type == "wav":
+        if audio_type == "ogg":
+            sf.write(_file, audio, sample_rate, format='ogg', subtype='vorbis')
+        elif audio_type == "wav":
             # Write out audio as 24bit PCM WAV
-            sf.write(_file, _audio, sample_rate, format='wav', subtype='PCM_24')
-        elif task.audio_type == "flac":
+            sf.write(_file, audio, sample_rate, format='wav', subtype='PCM_24')
+        elif audio_type == "flac":
             # Write out audio as 24bit Flac
-            sf.write(_file, _audio, sample_rate, format='flac', subtype='PCM_24')
-        elif task.audio_type == "silk":
+            sf.write(_file, audio, sample_rate, format='flac', subtype='PCM_24')
+        elif audio_type == "silk":
             # Write out audio as 24bit Flac
             byte_io = io.BytesIO(bytes())
-            sf.write(byte_io, audio.astype(np.int16), sample_rate)
+            sf.write(byte_io, audio, sample_rate)
             _file = BytesIO(initial_bytes=silkcoder.encode(byte_io))
             del byte_io
         else:
-            scipy.io.wavfile.write(_file, sample_rate, _audio)
+            scipy.io.wavfile.write(_file, sample_rate, audio)
         _file.seek(0)
+        return _file
+
+    def infer_task(self,
+                   task: InferTask = None,
+                   ):
+        """
+        :param task 任务
+        :return:
+        """
+        _audio = self.infer(task=task)
+        _file = self.encode_audio(_audio, task.sample_rate, task.audio_type)
         # 获取 wav 数据
         return _file
 
@@ -292,23 +306,14 @@ class TtsGenerate(object):
                 raise Exception("sample_rate must be same")
             if task.audio_type != task_list[0].audio_type:
                 raise Exception("audio_type must be same")
-        _file_list: List[io.BytesIO] = []
+        # 批量推理
+        _file = []
         for task in task_list:
-            _file_list.append(self.infer_task(task))
-        # 链接音频文件
-        output_signal = np.zeros((0,))
-        for file in _file_list:
-            signal, sample_rate = sf.read(file, dtype='float32')
-            output_signal = np.concatenate((output_signal, signal))
-
-        # 将浮点型数据转换为 PCM_16 格式的字节数组
-        output_signal = (output_signal * 32767).astype(np.int16)
-        output_byte = output_signal.tobytes()
-        # 释放内存
-        del output_signal
-        # 写出返回
-        output_bio = BytesIO(initial_bytes=output_byte)
-        return output_bio
+            _audio = self.infer(task=task)
+            _file.append(_audio)
+        # 合并音频
+        audio_data = np.concatenate(_file, axis=0)
+        return self.encode_audio(audio_data, task_list[0].sample_rate, task_list[0].audio_type)
 
     def create_infer_task(self,
                           c_text: str,
@@ -331,7 +336,7 @@ class TtsGenerate(object):
         sentence_cell = parse.create_cell(c_text, merge_same=False, cell_limit=140)
         sentence_task = parse.pack_up_task(sentence_cell=sentence_cell, task_limit=140, strip=True)
         for sentence in sentence_task:
-            _task_list.append(InferTask(
+            last = InferTask(
                 c_text="".join(sentence),
                 speaker_ids=speaker_ids,
                 noise_scale=noise_scale,
@@ -339,5 +344,10 @@ class TtsGenerate(object):
                 length_scale=length_scale,
                 sample_rate=sample_rate,
                 audio_type=audio_type
-            ))
+            )
+            _task_list.append(last)
+        # TEST
+        # test = last.copy()
+        # test.c_text = "[ZH]测试,多任务正常工作[ZH]"
+        # _task_list.append(test)
         return _task_list
