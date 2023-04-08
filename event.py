@@ -13,7 +13,6 @@ from typing import Literal, List, Optional
 import numpy as np
 # import librosa
 # import numpy as np
-import scipy
 import soundfile as sf
 import torch
 from graiax import silkcoder
@@ -273,7 +272,6 @@ class TtsGenerate(object):
         sample_rate = self.hps_ms_config.data.sampling_rate if not sample_rate else sample_rate
         sample_rate = int(sample_rate)
         sample_rate = 24000 if sample_rate < 0 else sample_rate
-        # 使用 scipy 将 Numpy 数据写入字节流
         if audio_type == "ogg":
             sf.write(_file, audio, sample_rate, format='ogg', subtype='vorbis')
         elif audio_type == "wav":
@@ -289,7 +287,7 @@ class TtsGenerate(object):
             _file = BytesIO(initial_bytes=silkcoder.encode(byte_io))
             del byte_io
         else:
-            scipy.io.wavfile.write(_file, sample_rate, audio)
+            sf.write(_file, audio, sample_rate, format='wav', subtype='PCM_24')
         _file.seek(0)
         return _file
 
