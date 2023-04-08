@@ -23,7 +23,6 @@ fastapi
 pydantic
 loguru
 soundfile
-rtoml
 graiax-silkcoder[libsndfile]
 psutil
 fasttext-wheel
