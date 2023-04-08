@@ -8,13 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && \
-    apt-get install -y build-essential libsndfile1 vim gcc g++ cmake && \
-    python3 -m pip install --no-cache-dir --upgrade pip
+    apt-get install -y build-essential libsndfile1 vim gcc g++ cmake gfortan && \
+    python3 -m pip install --upgrade pip numpy numba scipy
 
 WORKDIR /build
 
 COPY requirements.txt .
-RUN python3 -m pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install -r requirements.txt
 
 # Stage 2 - Runtime image
 FROM python:3.8-slim
