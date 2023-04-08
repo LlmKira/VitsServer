@@ -90,7 +90,8 @@ class ParseText(object):
             text_norm = text_to_sequence(text, hps.symbols, hps.data.text_cleaners)
         if hps.data.add_blank:
             text_norm = commons.intersperse(text_norm, 0)
-        text_norm = torch.LongTensor(text_norm)
+        text_norm = np.array(text_norm, dtype=np.int64)
+        # text_norm = torch.LongTensor(text_norm)
         return text_norm
 
     def get_stn_tst(self, c_text, hps_ms_config):
@@ -238,11 +239,13 @@ class TtsGenerate(object):
         #                                                             noise_w=noise_scale_w)
         # 构造对应 tensor
         with torch.no_grad():
-            _x_tst = _stn_tst.unsqueeze(0).numpy()
-            _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
+            _x_tst = _stn_tst[np.newaxis, :].astype(np.float32)
+            _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)
             _sid = np.array([task.speaker_ids], dtype=np.int64)
             scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
             scales.resize(1, 3)
+            _x_tst = _x_tst.astype(np.int64)
+            _x_tst_lengths = _x_tst_lengths.astype(np.int64)
             ort_inputs = {
                 'input': _x_tst,
                 'input_lengths': _x_tst_lengths,
