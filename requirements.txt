@@ -2,7 +2,6 @@ Cython>=0.29.21
 numba
 librosa
 numpy
-scipy
 torch
 unidecode
 pyopenjtalk
