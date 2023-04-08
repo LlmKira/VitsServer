@@ -114,6 +114,12 @@ model ID through the API.
 You can access f"{self.base_url}/model/list?show_speaker=True&show_ms_config=True" to obtain detailed information about
 model roles and configurations.
 
+## TODO 📝
+
+- [ ] Test Silk format
+- [ ] Docker for automatic deployment
+- [ ] Shell script for automatic deployment
+
 ## Acknowledgements 🙏
 
 We would like to acknowledge the contributions of the following projects in the development of this project:
