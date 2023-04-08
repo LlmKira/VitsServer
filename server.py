@@ -11,12 +11,9 @@
 import pathlib
 
 import psutil
-import rtoml
-import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from pydantic import BaseModel
 
 from component.nlp_utils.detect import DetectSentence
 from component.warp import Parse
@@ -40,6 +37,7 @@ for model_config_path in pathlib.Path("./model").iterdir():
         onnx_model_path = model_config_path.parent / f'{model_config_path.stem}.onnx'
         if pathlib.Path(pth_model_path).exists() or pathlib.Path(onnx_model_path).exists():
             _Model_list[model_config_path.stem] = TtsGenerate(model_config_path=str(model_config_path.absolute()))
+            logger.success(f"载入了 {model_config_path} 对应的模型配置")
         else:
             logger.warning(f"{model_config_path} 没有对应的模型文件")
 
@@ -133,36 +131,8 @@ async def tts(tts_req: TtsSchema, auto_parse: bool = False):
                                      load_prefer=tts_req.load_prefer
                                      )
     except Exception as e:
-        raise e
         logger.error(e)
         raise HTTPException(status_code=500, detail="Error When Generate Voice!")
     else:
         _result.seek(0)
         return StreamingResponse(_result, media_type="application/octet-stream")
-
-
-# Run
-CONF = rtoml.load(open("config.toml", 'r'))
-
-
-class FastApiConf(BaseModel):
-    reload: bool = False
-    host: str = "127.0.0.1"
-    port: int = 0
-    workers: int = 1
-
-
-ServerConf = CONF.get("server") if CONF.get("server") else {}
-FastApi = FastApiConf(**ServerConf)
-
-if FastApi.reload:
-    logger.warning("reload 参数有内容修改自动重启服务器，启用可能导致连续重启导致 CPU 满载")
-
-if __name__ == '__main__':
-    uvicorn.run('server:app',
-                host=FastApi.host,
-                port=FastApi.port,
-                reload=FastApi.reload,
-                log_level="debug",
-                workers=FastApi.workers
-                )

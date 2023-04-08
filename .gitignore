@@ -5,6 +5,7 @@
 model/*.json
 model/*.pth
 model/*.bak
+model/*.onnx
 .idea
 # User-specific files
 *.rsuser

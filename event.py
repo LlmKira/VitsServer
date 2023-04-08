@@ -255,7 +255,6 @@ class TtsGenerate(object):
             _stn_tst = commons.intersperse(_stn_tst, 0)
         with torch.no_grad():
             _x_tst = np.array([_stn_tst], dtype=np.int64)
-            # _x_tst = _stn_tst.unsqueeze(0)
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
             _sid = np.array([speaker_ids], dtype=np.int64)
             scales = np.array([noise_scale, noise_scale_w, length_scale], dtype=np.float32)
