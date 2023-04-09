@@ -12,10 +12,14 @@ preference settings and optimize performance.
 
 ## Advantages 💪
 
-- Automatic language type parsing for text, eliminating the need for language recognition segmentation.
-- Supports multiple audio formats, including ogg, wav, flac, and silk.
-- Multiple models, streaming inference.
-- Additional inference settings to enable model preference settings and optimize performance.
+- [x] Long Voice Generation, Support Streaming. 长语音批次推理合并。
+- [x] Automatic language type parsing for text, eliminating the need for language recognition segmentation.
+  自动识别语言类型并处理一切。
+- [x] Supports multiple audio formats, including ogg, wav, flac, and silk. 多格式返回写入。
+- [x] Multiple models, streaming inference. 多模型初始化。
+- [x] Additional inference settings to enable model preference settings and optimize performance. 额外的推理设置，启用模型偏好设置。
+- [x] Auto Convert PTH to ONNX. 自动转换pth到onnx。
+- [ ] Support for multiple languages, including Chinese, English, Japanese, and Korean. 多语言支持。
 
 ## API Documentation 📖
 
