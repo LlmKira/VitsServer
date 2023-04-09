@@ -119,6 +119,8 @@ will be automatically converted to `.onnx`!
 
 `Model ID` is `1000_epochs` and `233_epochs`.
 
+**when you put model files in the `model` folder, you should restart the server.**
+
 ### Model Extension Design 🔍
 
 You can add extra fields in the model configuration to obtain information such as the model name corresponding to the
