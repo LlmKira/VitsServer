@@ -66,28 +66,31 @@ export VITS_SERVER_RELOAD="false"
 
 `VITS_SERVER_RELOAD` means auto restart server when file changed.
 
-### Running from pipenv 🐍
+### Running from pipenv 🐍 and pm2.json 🚀
 
 ```shell
 apt-get update &&
   apt-get install -y build-essential libsndfile1 vim gcc g++ cmake
 apt install python3-pip
 pip3 install pipenv
-pipenv install    # Create and install dependency packages
-pipenv shell      # Activate the virtual environment
+pipenv install  # Create and install dependency packages
+pipenv shell    # Activate the virtual environment
 python3 main.py # Run
-
+# then ctrl+c exit
 ```
 
-### Running from pm2.json 🚀
-
 ```shell
-apt-get update &&
-  apt-get install -y build-essential libsndfile1 vim gcc g++ cmake &&
-  python3 -m pip install -r requirements.txt
 apt install npm
 npm install pm2 -g
 pm2 start pm2.json
+# then the server will run in the background
+
+```
+
+and we have a one-click script to install `pipenv` and `npm`:
+
+```shell
+curl -LO https://raw.githubusercontent.com/LlmKira/VitsServer/main/deploy_script.sh && chmod +x deploy_script.sh && ./deploy_script.sh
 
 ```
 
@@ -170,7 +173,7 @@ model roles and configurations.
 
 - [ ] Test Silk format
 - [x] Docker for automatic deployment
-- [ ] Shell script for automatic deployment
+- [x] Shell script for automatic deployment
 
 ## Acknowledgements 🙏
 
