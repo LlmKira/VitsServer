@@ -69,6 +69,8 @@ export VITS_SERVER_RELOAD="false"
 ### Running from pipenv 🐍
 
 ```shell
+apt-get update &&
+  apt-get install -y build-essential libsndfile1 vim gcc g++ cmake
 apt install python3-pip
 pip3 install pipenv
 pipenv install    # Create and install dependency packages
