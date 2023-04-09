@@ -47,6 +47,9 @@ Configuration is in `.env`, including the following fields:
 VITS_SERVER_HOST=0.0.0.0
 VITS_SERVER_PORT=9557
 VITS_SERVER_RELOAD=false
+# VITS_SERVER_WORKERS=1
+# VITS_SERVER_INIT_CONFIG="https://....json"
+# VITS_SERVER_INIT_MODEL="https://.....pth or onnx"
 ```
 
 or you can use the following command to set the environment variable:
@@ -104,6 +107,13 @@ where `<local-path>` is the local folder path you want to map to the /app/model 
 
 In the `model` folder, place the `model.pth`/ `model.onnx` and corresponding `model.json` files. If it is `.pth`, it
 will be automatically converted to `.onnx`!
+
+you can use `.env` to set `VITS_SERVER_INIT_CONFIG` and `VITS_SERVER_INIT_MODEL` to download model files.
+
+```dotenv
+VITS_SERVER_INIT_CONFIG="https://....json"
+VITS_SERVER_INIT_MODEL="https://.....pth?trace=233 or onnx?trace=233"
+```
 
 `model` folder structure:
 

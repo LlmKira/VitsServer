@@ -151,7 +151,8 @@ class TtsGenerate(object):
         try:
             _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
         except Exception as e:
-            logger.error(f"Model Not Found Or Convert Error: {e}")
+            logger.error(
+                f"Model Not Found Or Convert Error: {e},模型可能不是 Vits 模型而是 SC 歌声转换模型，此模型暂时还不支持")
             return None
         model = RunONNX(model=_vits_base, providers=['CPUExecutionProvider'])
         # model = onnx_infer.SynthesizerTrn(

@@ -36,8 +36,12 @@ for model_config_path in pathlib.Path("./model").iterdir():
         pth_model_path = model_config_path.parent / f'{model_config_path.stem}.pth'
         onnx_model_path = model_config_path.parent / f'{model_config_path.stem}.onnx'
         if pathlib.Path(pth_model_path).exists() or pathlib.Path(onnx_model_path).exists():
-            _Model_list[model_config_path.stem] = TtsGenerate(model_config_path=str(model_config_path.absolute()))
-            logger.success(f"载入了 {model_config_path} 对应的模型配置")
+            _load_model = TtsGenerate(model_config_path=str(model_config_path.absolute()))
+            _Model_list[model_config_path.stem] = _load_model
+            if _load_model.net_g_ms:
+                logger.success(f"{model_config_path} 对应的模型配置加载成功")
+            else:
+                logger.warning(f"{model_config_path} 对应的模型配置加载失败")
         else:
             logger.warning(f"{model_config_path} 没有对应的模型文件")
 

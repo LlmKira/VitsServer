@@ -31,3 +31,5 @@ onnx
 onnxruntime
 loguru
 monotonic_align
+tqdm
+httpx
