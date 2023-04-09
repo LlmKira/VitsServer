@@ -164,9 +164,13 @@ model ID through the API.
 }
 ```
 
-### How can I retrieve model information?
+`infer` is the default(prefer) inference settings for the model.
 
-You can access f"{self.base_url}/model/list?show_speaker=True&show_ms_config=True" to obtain detailed information about
+`info` is the model information.
+
+### How can I retrieve these model information?
+
+You can access `{your_base_url}/model/list?show_speaker=True&show_ms_config=True` to obtain detailed information about
 model roles and configurations.
 
 ## TODO 📝
