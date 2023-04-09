@@ -84,7 +84,7 @@ pm2 start pm2.json
 
 ### Building from Docker 🐋
 
-we have `docker push sudoskys/vits-server:main` to docker hub.
+we have `docker pull sudoskys/vits-server:main` to docker hub.
 
 you can also build from Dockerfile.
 
