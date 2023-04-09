@@ -167,7 +167,7 @@ model roles and configurations.
 ## TODO 📝
 
 - [ ] Test Silk format
-- [ ] Docker for automatic deployment
+- [x] Docker for automatic deployment
 - [ ] Shell script for automatic deployment
 
 ## Acknowledgements 🙏
