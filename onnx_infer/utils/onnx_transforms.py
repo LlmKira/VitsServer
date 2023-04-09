@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+# 作为原始副本存在，此文件被禁用
 import numpy as np
 import torch
 from torch.nn import functional as F

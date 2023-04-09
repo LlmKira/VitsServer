@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import math
 
 import monotonic_align
@@ -311,12 +312,14 @@ class Generator(torch.nn.Module):
                                     padding=(k - u) // 2)))
 
         self.resblocks = nn.ModuleList()
+        ch = None
         for i in range(len(self.ups)):
             ch = upsample_initial_channel // (2 ** (i + 1))
             for j, (k, d) in enumerate(
                     zip(resblock_kernel_sizes, resblock_dilation_sizes)):
                 self.resblocks.append(resblock(ch, k, d))
-
+        if ch is None:
+            raise ValueError('ups is empty')
         self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
         self.ups.apply(init_weights)
 
@@ -441,12 +444,11 @@ class MultiPeriodDiscriminator(torch.nn.Module):
     def __init__(self, use_spectral_norm=False):
         super(MultiPeriodDiscriminator, self).__init__()
         periods = [2, 3, 5, 7, 11]
-
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
-        discs = discs + [
+        discs.extend([
             DiscriminatorP(i, use_spectral_norm=use_spectral_norm)
             for i in periods
-        ]
+        ])
         self.discriminators = nn.ModuleList(discs)
 
     def forward(self, y, y_hat):

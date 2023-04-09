@@ -1,3 +1,5 @@
+# 作为原始副本存在，此库被禁用，而是 pypi 的库
+# pip install monotonic_align
 import numpy as np
 import torch
 

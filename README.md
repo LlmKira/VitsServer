@@ -84,6 +84,10 @@ pm2 start pm2.json
 
 ### Building from Docker 🐋
 
+we have `docker push sudoskys/vits-server:main` to docker hub.
+
+you can also build from Dockerfile.
+
 ```shell
 docker build -t <image-name> .
 ```
@@ -91,7 +95,7 @@ docker build -t <image-name> .
 where `<image-name>` is the name you want to give to the image. Then, use the following command to start the container:
 
 ```shell
-docker run -it -p 9557:9557 -v <local-path>/vits_model:/app/model <image-name>
+docker run -d -p 9557:9557 -v <local-path>/vits_model:/app/model <image-name>
 ```
 
 where `<local-path>` is the local folder path you want to map to the /app/model directory in the container.
@@ -100,6 +104,20 @@ where `<local-path>` is the local folder path you want to map to the /app/model 
 
 In the `model` folder, place the `model.pth`/ `model.onnx` and corresponding `model.json` files. If it is `.pth`, it
 will be automatically converted to `.onnx`!
+
+`model` folder structure:
+
+```
+.
+├── 1000_epochs.json
+├── 1000_epochs.onnx
+├── 1000_epochs.pth
+├── 233_epochs.json
+├── 233_epochs.onnx
+└── 233_epochs.pth
+```
+
+`Model ID` is `1000_epochs` and `233_epochs`.
 
 ### Model Extension Design 🔍
 
