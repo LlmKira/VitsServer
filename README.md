@@ -19,7 +19,7 @@ preference settings and optimize performance.
 - [x] Multiple models, streaming inference. 多模型初始化。
 - [x] Additional inference settings to enable model preference settings and optimize performance. 额外的推理设置，启用模型偏好设置。
 - [x] Auto Convert PTH to ONNX. 自动转换pth到onnx。
-- [ ] Support for multiple languages, including Chinese, English, Japanese, and Korean. 多语言支持。
+- [ ] Support for multiple languages, including Chinese, English, Japanese, and Korean. 多语言多模型合并支持（任务批次分发到不同模型）。
 
 ## API Documentation 📖
 
