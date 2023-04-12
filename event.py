@@ -8,8 +8,9 @@ import re
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
-from typing import Literal, List, Optional
+from typing import Literal, List, Optional, Union
 
+import librosa
 import numpy as np
 # import librosa
 # import numpy as np
@@ -18,6 +19,7 @@ import torch
 from graiax import silkcoder
 from loguru import logger
 from pydantic import BaseModel
+from torch import inference_mode, FloatTensor
 
 import utils
 from component.warp import Parse
@@ -47,13 +49,17 @@ class TtsSchema(BaseModel):
 
 
 class InferTask(BaseModel):
-    c_text: str
+    infer_sample: Union[str, BytesIO]
     speaker_ids: int = 0
     audio_type: Literal["ogg", "wav", "flac", "silk"] = "wav"
     length_scale: float = 1.0
     noise_scale: float = 0.667
     noise_scale_w: float = 0.8
     sample_rate: int = None
+    fn0: float = 0.1
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class ParseText(object):
@@ -122,7 +128,13 @@ class TtsGenerate(object):
     批次语音合成技术
     """
 
-    def __init__(self, model_config_path: str, model_path: str = None, device: str = "cpu", load_prefer: bool = True):
+    def __init__(self,
+                 model_config_path: str,
+                 model_path: str = None,
+                 device: str = "cpu",
+                 load_prefer: bool = True,
+                 hubert_soft_model_path=None,
+                 ):
         self.load_prefer = load_prefer
         self.model_config_path = model_config_path
         self.model_path = model_path if model_path else None
@@ -141,8 +153,12 @@ class TtsGenerate(object):
                 self.model_type = VitsModelType.TTS
             else:
                 self.model_type = VitsModelType.W2V2
-        else:
-            self.model_type = VitsModelType.HUBERT_SOFT
+        # else:
+        #    self.model_type = VitsModelType.HUBERT_SOFT
+        # load hubert-soft model
+        if hubert_soft_model_path is not None and self.n_symbols == 0:
+            from hubert_model import hubert_soft
+            self.hubert = hubert_soft(hubert_soft_model_path)
 
     def load_model(self):
         # 判定是否存在模型
@@ -152,7 +168,7 @@ class TtsGenerate(object):
             _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
         except Exception as e:
             logger.error(
-                f"Model Not Found Or Convert Error: {e},模型可能不是 Vits 模型而是 SC 歌声转换模型，此模型暂时还不支持")
+                f"Model Not Found Or Convert Error: {e} {self.model_config_path} ，可能是模型格式不正确，或者模型文件字段缺失")
             return None
         model = RunONNX(model=_vits_base, providers=['CPUExecutionProvider'])
         # model = onnx_infer.SynthesizerTrn(
@@ -215,15 +231,72 @@ class TtsGenerate(object):
             id_list.append({"id": ids, "name": name})
         return id_list
 
-    def infer(self,
-              task: InferTask = None,
-              ):
+    def infer_soft_vc(self,
+                      task: InferTask = None,
+                      ):
         """
+        语音转换任务推理接口
         :param task 任务
         :return:
         """
-        task.c_text = ParseText().clean_text(task.c_text)
-        _stn_tst = ParseText().get_stn_tst(task.c_text, self.hps_ms_config)
+        # 读模型偏好
+        if self.load_prefer:
+            task.noise_scale, task.noise_scale_w, task.length_scale = self.load_prefer_noise(self.hps_ms_config,
+                                                                                             task.noise_scale,
+                                                                                             task.noise_scale_w,
+                                                                                             task.length_scale
+                                                                                             )
+        # 载入并采样
+        audio = task.infer_sample
+        audio16000, sampling_rate = librosa.load(task.infer_sample, sr=16000, mono=True)
+        if self.use_f0:
+            audio, sampling_rate = librosa.load(task.infer_sample, sr=self.hps_ms_config.data.sampling_rate, mono=True)
+            audio16000 = librosa.resample(audio, orig_sr=sampling_rate, target_sr=16000)
+        # 创建 units
+        with inference_mode():
+            units = self.hubert.units(FloatTensor(audio16000).unsqueeze(0).unsqueeze(0)).squeeze(0).numpy()
+            if self.use_f0:
+                f0_scale = task.fn0 if task.fn0 is not None else 1
+                f0 = librosa.pyin(audio, sr=sampling_rate,
+                                  fmin=librosa.note_to_hz('C0'),
+                                  fmax=librosa.note_to_hz('C7'),
+                                  frame_length=1780)[0]
+                target_length = len(units[:, 0])
+                f0 = np.nan_to_num(np.interp(np.arange(0, len(f0) * target_length, len(f0)) / target_length,
+                                             np.arange(0, len(f0)), f0)) * f0_scale
+                units[:, 0] = f0 / 10
+
+        _stn_tst = FloatTensor(units)
+        with torch.no_grad():
+            _x_tst = _stn_tst.unsqueeze(0).numpy()
+            _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
+            _sid = np.array([task.speaker_ids], dtype=np.int64)
+            scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
+            scales.resize((1, 3))
+            ort_inputs = {
+                'input': _x_tst,
+                'input_lengths': _x_tst_lengths,
+                'scales': scales,
+                'sid': _sid
+            }
+            audio = np.squeeze(self.net_g_ms.run(model_input=ort_inputs))
+            audio *= 32767.0 / max(0.01, np.max(np.abs(audio))) * 0.6
+            audio = np.clip(audio, -32767.0, 32767.0)
+            _audio = audio.astype(np.int16)
+        # 释放内存
+        del _stn_tst, _x_tst, _x_tst_lengths, _sid
+        return audio
+
+    def infer_vits(self,
+                   task: InferTask = None,
+                   ):
+        """
+        文本转语音任务推理接口
+        :param task 任务
+        :return:
+        """
+        task.infer_sample = ParseText().clean_text(task.infer_sample)
+        _stn_tst = ParseText().get_stn_tst(task.infer_sample, self.hps_ms_config)
 
         # 读模型偏好
         if self.load_prefer:
@@ -243,7 +316,7 @@ class TtsGenerate(object):
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
             _sid = np.array([task.speaker_ids], dtype=np.int64)
             scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
-            scales.resize(1, 3)
+            scales.resize((1, 3))
             """
             _x_tst = _stn_tst[np.newaxis, :].astype(np.float32)
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)
@@ -300,7 +373,7 @@ class TtsGenerate(object):
         :param task 任务
         :return:
         """
-        _audio = self.infer(task=task)
+        _audio = self.infer_vits(task=task)
         _file = self.encode_audio(_audio, task.sample_rate, task.audio_type)
         # 获取 wav 数据
         return _file
@@ -319,18 +392,22 @@ class TtsGenerate(object):
         # 批量推理
         _file = []
         for task in task_list:
-            _audio = self.infer(task=task)
-            _file.append(_audio)
+            if isinstance(task.infer_sample, str):
+                _audio = self.infer_vits(task=task)
+                _file.append(_audio)
+            else:
+                _audio = self.infer_soft_vc(task=task)
+                _file.append(_audio)
         # 合并音频
         audio_data = np.concatenate(_file, axis=0)
         return self.encode_audio(audio_data, task_list[0].sample_rate, task_list[0].audio_type)
 
-    def create_infer_task(self,
-                          c_text: str,
-                          speaker_ids: int = 0, audio_type: str = "wav", length_scale: float = 1.0,
-                          noise_scale: float = 0.667, noise_scale_w: float = 0.8,
-                          sample_rate: Optional[int] = None
-                          ) -> List[InferTask]:
+    def create_vits_task(self,
+                         c_text: str,
+                         speaker_ids: int = 0, audio_type: str = "wav", length_scale: float = 1.0,
+                         noise_scale: float = 0.667, noise_scale_w: float = 0.8,
+                         sample_rate: Optional[int] = None
+                         ) -> List[InferTask]:
         """
         :param c_text 语句
         :param speaker_ids 说话人id
@@ -347,7 +424,7 @@ class TtsGenerate(object):
         sentence_task = parse.pack_up_task(sentence_cell=sentence_cell, task_limit=140, strip=True)
         for sentence in sentence_task:
             last = InferTask(
-                c_text="".join(sentence),
+                infer_sample="".join(sentence),
                 speaker_ids=speaker_ids,
                 noise_scale=noise_scale,
                 noise_scale_w=noise_scale_w,
@@ -358,6 +435,6 @@ class TtsGenerate(object):
             _task_list.append(last)
         # TEST
         # test = last.copy()
-        # test.c_text = "[ZH]测试,多任务正常工作[ZH]"
+        # test.infer_sample = "[ZH]测试,多任务正常工作[ZH]"
         # _task_list.append(test)
         return _task_list

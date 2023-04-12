@@ -46,7 +46,7 @@ class VitsExtractor(object):
         hps = utils.get_hparams_from_file(json_path)
 
         # Get symbols and initialize synthesizer model
-        symbols = hps.symbols
+        symbols = hps.symbols if "symbols" in hps else []
         net_g = onnx_infer.SynthesizerTrn(
             len(symbols),
             hps.data.filter_length // 2 + 1,

@@ -123,15 +123,15 @@ async def tts(tts_req: TtsSchema, auto_parse: bool = False):
     # if tts_req.audio_type not in TtsSchema().audio_type:
     #    raise HTTPException(status_code=400, detail="Audio Type is Invalid!")
     if auto_parse:
-        _task = server_build.create_infer_task(c_text=tts_req.text,
-                                               speaker_ids=tts_req.speaker_id,
-                                               audio_type=tts_req.audio_type,
-                                               length_scale=tts_req.length_scale,
-                                               noise_scale=tts_req.noise_scale,
-                                               noise_scale_w=tts_req.noise_scale_w
-                                               )
+        _task = server_build.create_vits_task(c_text=tts_req.text,
+                                              speaker_ids=tts_req.speaker_id,
+                                              audio_type=tts_req.audio_type,
+                                              length_scale=tts_req.length_scale,
+                                              noise_scale=tts_req.noise_scale,
+                                              noise_scale_w=tts_req.noise_scale_w
+                                              )
     else:
-        _task = [InferTask(c_text=tts_req.text,
+        _task = [InferTask(infer_sample=tts_req.text,
                            speaker_ids=tts_req.speaker_id,
                            audio_type=tts_req.audio_type,
                            length_scale=tts_req.length_scale,
