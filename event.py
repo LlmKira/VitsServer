@@ -156,6 +156,7 @@ class TtsGenerate(object):
         # else:
         #    self.model_type = VitsModelType.HUBERT_SOFT
         # load hubert-soft model
+        self.hubert = None
         if hubert_soft_model_path is not None and self.n_symbols == 0:
             from hubert_model import hubert_soft
             self.hubert = hubert_soft(hubert_soft_model_path)
@@ -239,6 +240,8 @@ class TtsGenerate(object):
         :param task 任务
         :return:
         """
+        if not self.hubert:
+            raise Exception("hubert-soft model not found")
         # 读模型偏好
         if self.load_prefer:
             task.noise_scale, task.noise_scale_w, task.length_scale = self.load_prefer_noise(self.hps_ms_config,
