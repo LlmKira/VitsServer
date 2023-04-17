@@ -23,6 +23,9 @@ def get_device(by_torch: bool = True):
     return infer_device
 
 
+DEVICE = get_device()
+
+
 class HParams(object):
     def __init__(self, **kwargs):
         for k, v in kwargs.items():

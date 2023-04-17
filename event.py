@@ -30,7 +30,7 @@ from text import text_to_sequence
 
 # 类型
 class VitsModelType(Enum):
-    TTS = "tts"
+    TTS = "vits"
     W2V2 = "w2v2"
     HUBERT_SOFT = "soft-vits-vc"
 
@@ -186,7 +186,7 @@ class TtsGenerate(object):
                 f"Model Not Found Or Convert Error: {e} {self.model_config_path} ，可能是模型格式不正确，或者模型文件字段缺失")
             return None
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        if utils.get_device() == "cpu":
+        if utils.DEVICE == "cpu":
             providers = ['CPUExecutionProvider']
         model = RunONNX(model=_vits_base, providers=providers)
         # model = onnx_infer.SynthesizerTrn(
@@ -284,7 +284,7 @@ class TtsGenerate(object):
         audio = (audio / np.iinfo(audio.dtype).max).astype(np.float32)
         # 创建 units
         with torch.inference_mode():
-            _x_tst = self.hubert.units(torch.FloatTensor(audio).unsqueeze(0).unsqueeze(0).to(utils.get_device()))
+            _x_tst = self.hubert.units(torch.FloatTensor(audio).unsqueeze(0).unsqueeze(0).to(utils.DEVICE))
 
         with torch.no_grad():
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
