@@ -12,6 +12,7 @@ from torch import load, FloatTensor
 def get_device(by_torch: bool = True):
     dotenv.load_dotenv()
     if torch.cuda.is_available():
+        logger.info("GPU Is Available!")
         infer_device = "gpu"
         if by_torch:
             infer_device = "cuda"
