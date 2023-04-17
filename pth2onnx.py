@@ -2,6 +2,7 @@ import io
 import os
 from typing import Union
 
+import librosa
 import torch
 
 import utils
@@ -9,14 +10,6 @@ from onnx_infer import onnx_infer
 from onnx_infer.infer import commons
 from onnx_infer.utils.onnx_utils import RunONNX
 from text import text_to_sequence
-
-if torch.cuda.is_available():
-    INFER_DEVICE = "GPU"
-    ONLY_CPU = os.environ.get('VITS_DISABLE_GPU', False) == 'true'
-    if ONLY_CPU:
-        INFER_DEVICE = "CPU"
-else:
-    INFER_DEVICE = "CPU"
 
 
 def get_text(text, hps):
@@ -51,8 +44,9 @@ class VitsExtractor(object):
                       ) -> io.BytesIO:
         # Load pa from JSON file
         if providers is None:
+            # providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            if INFER_DEVICE == "CPU":
+            if utils.get_device() == "cpu":
                 providers = ['CPUExecutionProvider']
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         hps = utils.get_hparams_from_file(json_path)
@@ -70,18 +64,24 @@ class VitsExtractor(object):
         _ = utils.load_checkpoint(model_path, net_g, None)
         net_g.forward = net_g.export_forward
         _ = net_g.eval()
-        #
-        seq = torch.randint(low=0, high=len(symbols), size=(1, 10), dtype=torch.long)
-        seq_len = torch.IntTensor([seq.size(1)]).long()
-
-        # noise(可用于控制感情等变化程度) lenth(可用于控制整体语速) noisew(控制音素发音长度变化程度)
-        # 参考 https://github.com/gbxh/genshinTTS
         scales = torch.FloatTensor([0.667, 1.0, 0.8])
         # make triton dynamic shape happy
         scales = scales.unsqueeze(0)
-        sid = torch.IntTensor([0]).long()
 
         onnx_model = io.BytesIO()
+        if symbols:
+            seq = torch.randint(low=0, high=len(symbols), size=(1, 10), dtype=torch.long)
+            seq_len = torch.IntTensor([seq.size(1)]).long()
+            sid = torch.IntTensor([0]).long()
+        else:
+            hubert = torch.hub.load("bshall/hubert:main", "hubert_soft", trust_repo=True)
+            audio16000, sampling_rate = librosa.load("sample.wav", sr=16000, mono=True)
+            seq = hubert.units(torch.FloatTensor(audio16000).unsqueeze(0).unsqueeze(0).to("cpu"))
+            # seq = torch.randint(low=0, high=1, size=(1, 10), dtype=torch.long)
+            seq_len = torch.IntTensor([seq.size(1)]).long()
+            sid = torch.IntTensor([0]).long()
+            # seq = hubert.units(torch.FloatTensor("").unsqueeze(0).unsqueeze(0))
+            # seq_len = torch.IntTensor([seq.size(1)]).long()
         dummy_input = (seq, seq_len, scales, sid)
         torch.onnx.export(model=net_g,
                           args=dummy_input,
@@ -119,6 +119,8 @@ class VitsExtractor(object):
             'scales': to_numpy(scales),
             'sid': to_numpy(sid),
         }
+        if not symbols:
+            ort_inputs.pop("sid")
         onnx_output = RunONNX(model=onnx_model, providers=providers).run(model_input=ort_inputs)
         # Convert PyTorch model to ONNX format
         if write_down:

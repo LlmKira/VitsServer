@@ -4,7 +4,6 @@
 # @File    : event.py
 # @Software: PyCharm
 import io
-import os
 import re
 from enum import Enum
 from io import BytesIO
@@ -20,7 +19,6 @@ import torch
 from graiax import silkcoder
 from loguru import logger
 from pydantic import BaseModel
-from torch import inference_mode, FloatTensor
 
 import utils
 from component.warp import Parse
@@ -29,21 +27,12 @@ from onnx_infer.utils.onnx_utils import RunONNX
 from pth2onnx import VitsExtractor
 from text import text_to_sequence
 
-if torch.cuda.is_available():
-    logger.info("GPU is available")
-    INFER_DEVICE = "GPU"
-    ONLY_CPU = os.environ.get('VITS_DISABLE_GPU', False) == 'true'
-    if ONLY_CPU:
-        INFER_DEVICE = "CPU"
-else:
-    INFER_DEVICE = "CPU"
-
 
 # 类型
 class VitsModelType(Enum):
     TTS = "tts"
     W2V2 = "w2v2"
-    HUBERT_SOFT = "hubert-soft"
+    HUBERT_SOFT = "soft-vits-vc"
 
 
 class TtsSchema(BaseModel):
@@ -58,14 +47,30 @@ class TtsSchema(BaseModel):
     load_prefer: bool = True
 
 
+class ConvertSchema(BaseModel):
+    model_id: str = ""
+    # audio: BytesIO = None
+    speaker_id: int = 0
+    audio_type: Literal["ogg", "wav", "flac", "silk"] = "wav"
+    length_scale: float = 1
+    noise_scale: float = 0.667
+    noise_scale_w: float = 0.8
+    sample_rate: int = 22050
+    load_prefer: bool = True
+
+
 class InferTask(BaseModel):
-    infer_sample: Union[str, BytesIO]
+    infer_sample: str
     speaker_ids: int = 0
     audio_type: Literal["ogg", "wav", "flac", "silk"] = "wav"
     length_scale: float = 1.0
     noise_scale: float = 0.667
     noise_scale_w: float = 0.8
     sample_rate: int = None
+
+
+class ConvertTask(InferTask):
+    infer_sample: BytesIO
     fn0: float = 0.1
 
     class Config:
@@ -143,7 +148,7 @@ class TtsGenerate(object):
                  model_path: str = None,
                  device: str = "cpu",
                  load_prefer: bool = True,
-                 hubert_soft_model_path=None,
+                 # hubert_soft_model_path=None,
                  ):
         self.load_prefer = load_prefer
         self.model_config_path = model_config_path
@@ -163,13 +168,12 @@ class TtsGenerate(object):
                 self.model_type = VitsModelType.TTS
             else:
                 self.model_type = VitsModelType.W2V2
-        # else:
-        #    self.model_type = VitsModelType.HUBERT_SOFT
+        else:
+            self.model_type = VitsModelType.HUBERT_SOFT
         # load hubert-soft model
         self.hubert = None
-        if hubert_soft_model_path is not None and self.n_symbols == 0:
-            from hubert_model import hubert_soft
-            self.hubert = hubert_soft(hubert_soft_model_path)
+        if self.n_symbols == 0:
+            self.hubert = torch.hub.load("bshall/hubert:main", "hubert_soft", trust_repo=True).to(device)
 
     def load_model(self):
         # 判定是否存在模型
@@ -178,11 +182,11 @@ class TtsGenerate(object):
         try:
             _vits_base = VitsExtractor().warp_pth(model_config_path=self.model_config_path, model_path=self.model_path)
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Model Not Found Or Convert Error: {e} {self.model_config_path} ，可能是模型格式不正确，或者模型文件字段缺失")
             return None
         providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-        if INFER_DEVICE == "CPU":
+        if utils.get_device() == "cpu":
             providers = ['CPUExecutionProvider']
         model = RunONNX(model=_vits_base, providers=providers)
         # model = onnx_infer.SynthesizerTrn(
@@ -246,7 +250,7 @@ class TtsGenerate(object):
         return id_list
 
     def infer_soft_vc(self,
-                      task: InferTask = None,
+                      task: ConvertTask = None,
                       ):
         """
         语音转换任务推理接口
@@ -262,29 +266,27 @@ class TtsGenerate(object):
                                                                                              task.noise_scale_w,
                                                                                              task.length_scale
                                                                                              )
+        # 给RAW音频数据加上格式
         # 载入并采样
-        audio = task.infer_sample
-        audio16000, sampling_rate = librosa.load(task.infer_sample, sr=16000, mono=True)
+        # TODO librosa 采样问题，我们无法采样不标准的音频
+        _file = sf.SoundFile(task.infer_sample, "r", samplerate=44100, channels=1, subtype="PCM_16")
+        # audio, sampling_rate = sf.read(_file, dtype='float32', always_2d=True)
+        audio, sampling_rate = librosa.load(_file, sr=16000, mono=True)
+        # audio16000, sampling_rate = librosa.load(path=audio, sr=16000, mono=True)
         if self.use_f0:
-            audio, sampling_rate = librosa.load(task.infer_sample, sr=self.hps_ms_config.data.sampling_rate, mono=True)
-            audio16000 = librosa.resample(audio, orig_sr=sampling_rate, target_sr=16000)
+            # audio, sampling_rate = sf.read(_file, samplerate=self.hps_ms_config.data.sampling_rate)
+            audio, sampling_rate = librosa.load(_file, sr=self.hps_ms_config.data.sampling_rate, mono=True)
+            audio = librosa.resample(audio, orig_sr=sampling_rate, target_sr=16000)
+        # 计算时长
+        duration = audio.shape[0] / sampling_rate
+        if duration > 30:
+            raise Exception("audio too long")
+        audio = (audio / np.iinfo(audio.dtype).max).astype(np.float32)
         # 创建 units
-        with inference_mode():
-            units = self.hubert.units(FloatTensor(audio16000).unsqueeze(0).unsqueeze(0)).squeeze(0).numpy()
-            if self.use_f0:
-                f0_scale = task.fn0 if task.fn0 is not None else 1
-                f0 = librosa.pyin(audio, sr=sampling_rate,
-                                  fmin=librosa.note_to_hz('C0'),
-                                  fmax=librosa.note_to_hz('C7'),
-                                  frame_length=1780)[0]
-                target_length = len(units[:, 0])
-                f0 = np.nan_to_num(np.interp(np.arange(0, len(f0) * target_length, len(f0)) / target_length,
-                                             np.arange(0, len(f0)), f0)) * f0_scale
-                units[:, 0] = f0 / 10
+        with torch.inference_mode():
+            _x_tst = self.hubert.units(torch.FloatTensor(audio).unsqueeze(0).unsqueeze(0).to(utils.get_device()))
 
-        _stn_tst = FloatTensor(units)
         with torch.no_grad():
-            _x_tst = _stn_tst.unsqueeze(0).numpy()
             _x_tst_lengths = np.array([_x_tst.shape[1]], dtype=np.int64)  # torch.LongTensor([_stn_tst.size(0)])
             _sid = np.array([task.speaker_ids], dtype=np.int64)
             scales = np.array([task.noise_scale, task.noise_scale_w, 1.0 / task.length_scale], dtype=np.float32)
@@ -299,8 +301,7 @@ class TtsGenerate(object):
             audio *= 32767.0 / max(0.01, np.max(np.abs(audio))) * 0.6
             audio = np.clip(audio, -32767.0, 32767.0)
             _audio = audio.astype(np.int16)
-        # 释放内存
-        del _stn_tst, _x_tst, _x_tst_lengths, _sid
+        del _x_tst, _x_tst_lengths, _sid
         return audio
 
     def infer_vits(self,
@@ -383,18 +384,21 @@ class TtsGenerate(object):
         return _file
 
     def infer_task(self,
-                   task: InferTask = None,
+                   task: Union[InferTask, ConvertTask] = None,
                    ):
         """
         :param task 任务
         :return:
         """
-        _audio = self.infer_vits(task=task)
+        if isinstance(task, ConvertTask):
+            _audio = self.infer_soft_vc(task=task)
+        else:
+            _audio = self.infer_vits(task=task)
         _file = self.encode_audio(_audio, task.sample_rate, task.audio_type)
         # 获取 wav 数据
         return _file
 
-    def infer_task_bat(self, task_list: List[InferTask]):
+    def infer_task_bat(self, task_list: List[Union[InferTask, ConvertTask]]):
         """
         :param task_list 任务列表
         :return:
@@ -408,10 +412,10 @@ class TtsGenerate(object):
         # 批量推理
         _file = []
         for task in task_list:
-            if isinstance(task.infer_sample, str):
+            if isinstance(task, InferTask):
                 _audio = self.infer_vits(task=task)
                 _file.append(_audio)
-            else:
+            if isinstance(task, ConvertTask):
                 _audio = self.infer_soft_vc(task=task)
                 _file.append(_audio)
         # 合并音频
@@ -420,8 +424,9 @@ class TtsGenerate(object):
 
     def create_vits_task(self,
                          c_text: str,
-                         speaker_ids: int = 0, audio_type: str = "wav", length_scale: float = 1.0,
-                         noise_scale: float = 0.667, noise_scale_w: float = 0.8,
+                         speaker_ids: int = 0,
+                         audio_type: str = "wav",
+                         length_scale: float = 1.0, noise_scale: float = 0.667, noise_scale_w: float = 0.8,
                          sample_rate: Optional[int] = None
                          ) -> List[InferTask]:
         """
@@ -434,6 +439,8 @@ class TtsGenerate(object):
         :param audio_type 音频类型
         :return:
         """
+        if self.hubert:
+            logger.warning("hubert is not None, maybe you shouldn't use `create_vits_task` function")
         _task_list = []
         parse = Parse()
         sentence_cell = parse.create_cell(c_text, merge_same=False, cell_limit=140)

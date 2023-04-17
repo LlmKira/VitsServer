@@ -1,10 +1,26 @@
 import os
 from json import loads
 
+import dotenv
 import librosa
+import torch
 from loguru import logger
 from numpy import float32
 from torch import load, FloatTensor
+
+
+def get_device(by_torch: bool = True):
+    dotenv.load_dotenv()
+    if torch.cuda.is_available():
+        infer_device = "gpu"
+        if by_torch:
+            infer_device = "cuda"
+        only_cpu = os.environ.get('VITS_DISABLE_GPU', False) == 'true'
+        if only_cpu:
+            infer_device = "cpu"
+    else:
+        infer_device = "cpu"
+    return infer_device
 
 
 class HParams(object):
