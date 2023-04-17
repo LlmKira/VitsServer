@@ -1,6 +1,6 @@
 import io
 import os
-from typing import Literal, Union
+from typing import Union
 
 import torch
 
@@ -9,6 +9,14 @@ from onnx_infer import onnx_infer
 from onnx_infer.infer import commons
 from onnx_infer.utils.onnx_utils import RunONNX
 from text import text_to_sequence
+
+if torch.cuda.is_available():
+    INFER_DEVICE = "GPU"
+    ONLY_CPU = os.environ.get('VITS_DISABLE_GPU', False) == 'true'
+    if ONLY_CPU:
+        INFER_DEVICE = "CPU"
+else:
+    INFER_DEVICE = "CPU"
 
 
 def get_text(text, hps):
@@ -39,9 +47,13 @@ class VitsExtractor(object):
     def convert_model(self, json_path: str,
                       model_path: str,
                       write_down: Union[bool, str] = None,
-                      providers: Literal['CPUExecutionProvider', 'CUDAExecutionProvider'] = 'CPUExecutionProvider',
+                      providers=None,
                       ) -> io.BytesIO:
         # Load pa from JSON file
+        if providers is None:
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+            if INFER_DEVICE == "CPU":
+                providers = ['CPUExecutionProvider']
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         hps = utils.get_hparams_from_file(json_path)
 
@@ -107,7 +119,7 @@ class VitsExtractor(object):
             'scales': to_numpy(scales),
             'sid': to_numpy(sid),
         }
-        onnx_output = RunONNX(model=onnx_model, providers=[providers]).run(model_input=ort_inputs)
+        onnx_output = RunONNX(model=onnx_model, providers=providers).run(model_input=ort_inputs)
         # Convert PyTorch model to ONNX format
         if write_down:
             if type(write_down) == str:

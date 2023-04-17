@@ -4,6 +4,7 @@
 # @File    : event.py
 # @Software: PyCharm
 import io
+import os
 import re
 from enum import Enum
 from io import BytesIO
@@ -27,6 +28,15 @@ from onnx_infer.infer import commons
 from onnx_infer.utils.onnx_utils import RunONNX
 from pth2onnx import VitsExtractor
 from text import text_to_sequence
+
+if torch.cuda.is_available():
+    logger.info("GPU is available")
+    INFER_DEVICE = "GPU"
+    ONLY_CPU = os.environ.get('VITS_DISABLE_GPU', False) == 'true'
+    if ONLY_CPU:
+        INFER_DEVICE = "CPU"
+else:
+    INFER_DEVICE = "CPU"
 
 
 # 类型
@@ -171,7 +181,10 @@ class TtsGenerate(object):
             logger.error(
                 f"Model Not Found Or Convert Error: {e} {self.model_config_path} ，可能是模型格式不正确，或者模型文件字段缺失")
             return None
-        model = RunONNX(model=_vits_base, providers=['CPUExecutionProvider'])
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        if INFER_DEVICE == "CPU":
+            providers = ['CPUExecutionProvider']
+        model = RunONNX(model=_vits_base, providers=providers)
         # model = onnx_infer.SynthesizerTrn(
         #     len(self.hps_ms_config.symbols),
         #     self.hps_ms_config.data.filter_length // 2 + 1,
