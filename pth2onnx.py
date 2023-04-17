@@ -120,6 +120,7 @@ class VitsExtractor(object):
             'sid': to_numpy(sid),
         }
         if not symbols:
+            # TODO 检查模型结构，似乎无法正常导出 Hubert 模型
             ort_inputs.pop("sid")
         onnx_output = RunONNX(model=onnx_model, providers=providers).run(model_input=ort_inputs)
         # Convert PyTorch model to ONNX format
