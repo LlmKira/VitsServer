@@ -33,3 +33,4 @@ loguru
 monotonic_align
 tqdm
 httpx
+python-multipart

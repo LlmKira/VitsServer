@@ -8,17 +8,21 @@
 # @FileName: main.py
 # @Software: PyCharm
 # @Github    ：sudoskys
+import io
 import pathlib
+import shutil
+from typing import Annotated
 
 import psutil
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
+import utils
 from component.nlp_utils.detect import DetectSentence
 from component.warp import Parse
 # from celery_worker import tts_order
-from event import TtsGenerate, TtsSchema, InferTask
+from event import TtsGenerate, TtsSchema, InferTask, ConvertTask, ConvertSchema
 
 # 日志机器
 logger.add(sink='run.log',
@@ -36,7 +40,7 @@ for model_config_path in pathlib.Path("./model").iterdir():
         pth_model_path = model_config_path.parent / f'{model_config_path.stem}.pth'
         onnx_model_path = model_config_path.parent / f'{model_config_path.stem}.onnx'
         if pathlib.Path(pth_model_path).exists() or pathlib.Path(onnx_model_path).exists():
-            _load_model = TtsGenerate(model_config_path=str(model_config_path.absolute()))
+            _load_model = TtsGenerate(model_config_path=str(model_config_path.absolute()), device=utils.get_device())
             _Model_list[model_config_path.stem] = _load_model
             if _load_model.net_g_ms:
                 logger.success(f"{model_config_path} 对应的模型配置加载成功")
@@ -64,7 +68,9 @@ def tts_model(show_speaker: bool = False, show_ms_config: bool = False):
         _model: TtsGenerate
         _item = {
             "model_id": _model_name,
-            "model_info": _model.get_model_info()
+            "model_info": _model.get_model_info(),
+            # 是否某个属性是NONE  ,
+            "model_class": _model.model_type.value,
         }
         if show_speaker:
             _item["speaker"] = _model.get_speaker_list()
@@ -109,6 +115,45 @@ def tts_parse(text: str, strip: bool = False,
     return {"code": 0, "message": "success", "data": _result}
 
 
+@app.post("/svc/convert")
+async def svc_convert(model_id: Annotated[str, Form()],
+                      noise_scale: Annotated[float, Form()] = 0.667,
+                      length_scale: Annotated[float, Form()] = 1.4,
+                      audio_type: Annotated[str, Form()] = "wav",
+                      speaker_id: Annotated[int, Form()] = 0, file: UploadFile = File(...)):
+    global _Model_list
+    tts_req = ConvertSchema()
+    tts_req.model_id = model_id
+    tts_req.noise_scale = noise_scale
+    tts_req.length_scale = length_scale
+    tts_req.audio_type = audio_type
+    tts_req.speaker_id = speaker_id
+    server_build = _Model_list.get(tts_req.model_id, None)
+    server_build: TtsGenerate
+    # 检查模型是否存在
+    if not server_build:
+        raise HTTPException(status_code=404, detail="Model Not Found!")
+    if not server_build.hubert:
+        raise HTTPException(status_code=404, detail="Hubert Model Not Found!")
+    # 检查请求合法性
+    if not file:
+        raise HTTPException(status_code=400, detail="Text is Empty!")
+    # if tts_req.audio_type not in TtsSchema().audio_type:
+    #    raise HTTPException(status_code=400, detail="Audio Type is Invalid!")
+    conv = io.BytesIO()
+    with open(file.filename, "wb") as buffer:
+        shutil.copyfileobj(conv, buffer)
+    _task = ConvertTask(infer_sample=conv,
+                        speaker_ids=tts_req.speaker_id,
+                        audio_type=tts_req.audio_type,
+                        length_scale=tts_req.length_scale,
+                        noise_scale=tts_req.noise_scale,
+                        )
+    # tts_order.delay(_task)
+    _result = server_build.infer_task(_task)
+    return StreamingResponse(_result, media_type="application/octet-stream")
+
+
 @app.post("/tts/generate")
 async def tts(tts_req: TtsSchema, auto_parse: bool = False):
     global _Model_list
@@ -117,21 +162,26 @@ async def tts(tts_req: TtsSchema, auto_parse: bool = False):
     # 检查模型是否存在
     if not server_build:
         raise HTTPException(status_code=404, detail="Model Not Found!")
+
+    # 检查模型
+    # if server_build.hubert:
+    #     raise HTTPException(status_code=400, detail="self.n_symbols==0 and Hubert Model Be Found!")
+
     # 检查请求合法性
     if not tts_req.text:
         raise HTTPException(status_code=400, detail="Text is Empty!")
     # if tts_req.audio_type not in TtsSchema().audio_type:
     #    raise HTTPException(status_code=400, detail="Audio Type is Invalid!")
     if auto_parse:
-        _task = server_build.create_infer_task(c_text=tts_req.text,
-                                               speaker_ids=tts_req.speaker_id,
-                                               audio_type=tts_req.audio_type,
-                                               length_scale=tts_req.length_scale,
-                                               noise_scale=tts_req.noise_scale,
-                                               noise_scale_w=tts_req.noise_scale_w
-                                               )
+        _task = server_build.create_vits_task(c_text=tts_req.text,
+                                              speaker_ids=tts_req.speaker_id,
+                                              audio_type=tts_req.audio_type,
+                                              length_scale=tts_req.length_scale,
+                                              noise_scale=tts_req.noise_scale,
+                                              noise_scale_w=tts_req.noise_scale_w
+                                              )
     else:
-        _task = [InferTask(c_text=tts_req.text,
+        _task = [InferTask(infer_sample=tts_req.text,
                            speaker_ids=tts_req.speaker_id,
                            audio_type=tts_req.audio_type,
                            length_scale=tts_req.length_scale,

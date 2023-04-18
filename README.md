@@ -62,6 +62,8 @@ or you can use the following command to set the environment variable:
 export VITS_SERVER_HOST="0.0.0.0"
 export VITS_SERVER_PORT="9557"
 export VITS_SERVER_RELOAD="false"
+export VITS_DISABLE_GPU="false"
+
 ```
 
 `VITS_SERVER_RELOAD` means auto restart server when file changed.
