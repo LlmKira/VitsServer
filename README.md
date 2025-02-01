@@ -10,6 +10,12 @@
 ⚡ A VITS ONNX server designed for fast inference, supporting streaming and additional inference settings to enable model
 preference settings and optimize performance.
 
+## 🧪 Experimental purposes only
+
+This project is for experimental purposes only.
+
+**If you are looking for a production-ready TTS implementation, go to https://github.com/RVC-Boss/GPT-SoVITS**
+
 ## Advantages 💪
 
 - [x] Long Voice Generation, Support Streaming. 长语音批次推理合并。
